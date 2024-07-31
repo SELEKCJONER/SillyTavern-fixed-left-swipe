@@ -1,7 +1,6 @@
-import { pipeline, env, RawImage } from 'sillytavern-transformers';
+import { pipeline, env, RawImage, Pipeline } from 'sillytavern-transformers';
 import { getConfigValue } from './util.js';
 import path from 'path';
-import _ from 'lodash';
 
 configureTransformers();
 
@@ -17,19 +16,45 @@ const tasks = {
         defaultModel: 'Cohee/distilbert-base-uncased-go-emotions-onnx',
         pipeline: null,
         configField: 'extras.classificationModel',
+        quantized: true,
     },
     'image-to-text': {
         defaultModel: 'Xenova/vit-gpt2-image-captioning',
         pipeline: null,
         configField: 'extras.captioningModel',
+        quantized: true,
     },
     'feature-extraction': {
         defaultModel: 'Xenova/all-mpnet-base-v2',
         pipeline: null,
         configField: 'extras.embeddingModel',
+        quantized: true,
+    },
+    'text-generation': {
+        defaultModel: 'Cohee/fooocus_expansion-onnx',
+        pipeline: null,
+        configField: 'extras.promptExpansionModel',
+        quantized: true,
+    },
+    'automatic-speech-recognition': {
+        defaultModel: 'Xenova/whisper-small',
+        pipeline: null,
+        configField: 'extras.speechToTextModel',
+        quantized: true,
+    },
+    'text-to-speech': {
+        defaultModel: 'Xenova/speecht5_tts',
+        pipeline: null,
+        configField: 'extras.textToSpeechModel',
+        quantized: false,
     },
 }
 
+/**
+ * Gets a RawImage object from a base64-encoded image.
+ * @param {string} image Base64-encoded image
+ * @returns {Promise<RawImage|null>} Object representing the image
+ */
 async function getRawImage(image) {
     try {
         const buffer = Buffer.from(image, 'base64');
@@ -43,6 +68,11 @@ async function getRawImage(image) {
     }
 }
 
+/**
+ * Gets the model to use for a given transformers.js task.
+ * @param {string} task The task to get the model for
+ * @returns {string} The model to use for the given task
+ */
 function getModelForTask(task) {
     const defaultModel = tasks[task].defaultModel;
 
@@ -50,26 +80,37 @@ function getModelForTask(task) {
         const model = getConfigValue(tasks[task].configField, null);
         return model || defaultModel;
     } catch (error) {
-        console.warn('Failed to read config.conf, using default classification model.');
+        console.warn('Failed to read config.yaml, using default classification model.');
         return defaultModel;
     }
 }
 
-async function getPipeline(task) {
+/**
+ * Gets the transformers.js pipeline for a given task.
+ * @param {import('sillytavern-transformers').PipelineType} task The task to get the pipeline for
+ * @param {string} forceModel The model to use for the pipeline, if any
+ * @returns {Promise<Pipeline>} Pipeline for the task
+ */
+async function getPipeline(task, forceModel = '') {
     if (tasks[task].pipeline) {
-        return tasks[task].pipeline;
+        if (forceModel === '' || tasks[task].currentModel === forceModel) {
+            return tasks[task].pipeline;
+        }
+        console.log('Disposing transformers.js pipeline for for task', task, 'with model', tasks[task].currentModel);
+        await tasks[task].pipeline.dispose();
     }
 
     const cache_dir = path.join(process.cwd(), 'cache');
-    const model = getModelForTask(task);
+    const model = forceModel || getModelForTask(task);
     const localOnly = getConfigValue('extras.disableAutoDownload', false);
     console.log('Initializing transformers.js pipeline for task', task, 'with model', model);
-    const instance = await pipeline(task, model, { cache_dir, quantized: true, local_files_only: localOnly });
+    const instance = await pipeline(task, model, { cache_dir, quantized: tasks[task].quantized ?? true, local_files_only: localOnly });
     tasks[task].pipeline = instance;
+    tasks[task].currentModel = model;
     return instance;
 }
 
 export default {
     getPipeline,
     getRawImage,
-}
+};

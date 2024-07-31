@@ -1,4 +1,4 @@
-FROM node:19.1.0-alpine3.16
+FROM node:lts-alpine3.18
 
 # Arguments
 ARG APP_HOME=/home/node/app
@@ -12,29 +12,23 @@ ENTRYPOINT [ "tini", "--" ]
 # Create app directory
 WORKDIR ${APP_HOME}
 
+# Set NODE_ENV to production
+ENV NODE_ENV=production
+
 # Install app dependencies
 COPY package*.json post-install.js ./
 RUN \
   echo "*** Install npm packages ***" && \
-  npm install && npm cache clean --force
+  npm i --no-audit --no-fund --quiet --omit=dev && npm cache clean --force
 
 # Bundle app source
 COPY . ./
 
 # Copy default chats, characters and user avatars to <folder>.default folder
 RUN \
-  IFS="," RESOURCES="characters,chats,groups,group chats,User Avatars,worlds,OpenAI Settings,NovelAI Settings,KoboldAI Settings,TextGen Settings" && \
-  \
-  echo "*** Store default $RESOURCES in <folder>.default ***" && \
-  for R in $RESOURCES; do mv "public/$R" "public/$R.default"; done && \
-  \
-  echo "*** Create symbolic links to config directory ***" && \
-  for R in $RESOURCES; do ln -s "../config/$R" "public/$R"; done && \
-  # rm "config.conf" "public/settings.json" "public/css/bg_load.css" && \
-  ln -s "./config/config.conf" "config.conf" && \
-  ln -s "../config/settings.json" "public/settings.json" && \
-  ln -s "../../config/bg_load.css" "public/css/bg_load.css" && \
-  mkdir "config"
+  rm -f "config.yaml" || true && \
+  ln -s "./config/config.yaml" "config.yaml" || true && \
+  mkdir "config" || true
 
 # Cleanup unnecessary files
 RUN \

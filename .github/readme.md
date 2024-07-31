@@ -1,20 +1,33 @@
-English | [中文](readme-zh_cn.md)
+<a name="readme-top"></a>
 
-![image](https://github.com/SillyTavern/SillyTavern/assets/18619528/8c41a061-7f72-4d2b-9d54-e6d058209e7b)
+English | [中文](readme-zh_cn.md) | [日本語](readme-ja_jp.md) | [Русский](readme-ru_ru.md)
 
-Mobile-friendly, Multi-API (KoboldAI/CPP, Horde, NovelAI, Ooba, OpenAI, OpenRouter, Claude, Scale), VN-like Waifu Mode, Horde SD, System TTS, WorldInfo (lorebooks), customizable UI, auto-translate, and more prompt options than you'd ever want or need. Optional Extras server for more SD/TTS options + ChromaDB/Summarize.
+![][cover]
 
-Based on a fork of TavernAI 1.2.8
+Mobile-friendly layout, Multi-API (KoboldAI/CPP, Horde, NovelAI, Ooba, OpenAI, OpenRouter, Claude, Scale), VN-like Waifu Mode, Stable Diffusion, TTS, WorldInfo (lorebooks), customizable UI, auto-translate, and more prompt options than you'd ever want or need + ability to install third-party extensions.
+
+Based on a fork of [TavernAI](https://github.com/TavernAI/TavernAI) 1.2.8
+
+## Important news!
+
+1. We have created a [Documentation website](https://docs.sillytavern.app/) to answer most of your questions and help you get started.
+
+2. Missing extensions after the update? Since the 1.10.6 release version, most of the previously built-in extensions have been converted to downloadable add-ons. You can download them via the built-in "Download Extensions and Assets" menu in the extensions panel (stacked blocks icon in the top bar).
+
+3. Unsupported platform: android arm LEtime-web. 32-bit Android requires an external dependency that can't be installed with npm. Use the following command to install it: `pkg install esbuild`. Then run the usual installation steps.
 
 ### Brought to you by Cohee, RossAscends, and the SillyTavern community
-
-NOTE: We have created a [Documentation website](https://docs.sillytavern.app/) to answer most of your questions and help you get started.
 
 ### What is SillyTavern or TavernAI?
 
 SillyTavern is a user interface you can install on your computer (and Android phones) that allows you to interact with text generation AIs and chat/roleplay with characters you or the community create.
 
 SillyTavern is a fork of TavernAI 1.2.8 which is under more active development and has added many major features. At this point, they can be thought of as completely independent programs.
+
+## Screenshots
+
+<img width="400" alt="image" src="https://github.com/SillyTavern/SillyTavern/assets/61471128/e902c7a2-45a6-4415-97aa-c59c597669c1"> 
+<img width="400" alt="image" src="https://github.com/SillyTavern/SillyTavern/assets/61471128/f8a79c47-4fe9-4564-9e4a-bf247ed1c961">
 
 ### Branches
 
@@ -25,36 +38,25 @@ SillyTavern is being developed using a two-branch system to ensure a smooth expe
 
 If you're not familiar with using the git CLI or don't understand what a branch is, don't worry! The release branch is always the preferable option for you.
 
-### What do I need other than Tavern?
+### What do I need other than SillyTavern?
 
-On its own Tavern is useless, as it's just a user interface. You have to have access to an AI system backend that can act as the roleplay character. There are various supported backends: OpenAPI API (GPT), KoboldAI (either running locally or on Google Colab), and more. You can read more about this in [the FAQ](https://docs.sillytavern.app/usage/faq/).
+On its own SillyTavern is useless, as it's just a user interface. You have to have access to an AI system backend that can act as the roleplay character. There are various supported backends: OpenAPI API (GPT), KoboldAI (either running locally or on Google Colab), and more. You can read more about this in [the FAQ](https://docs.sillytavern.app/usage/faq/).
 
-### Do I need a powerful PC to run Tavern?
+### Do I need a powerful PC to run SillyTavern?
 
-Since Tavern is only a user interface, it has tiny hardware requirements, it will run on anything. It's the AI system backend that needs to be powerful.
-
-## Mobile support
-
-> **Note**
-
-> **This fork can be run natively on Android phones using Termux. Please refer to this guide by ArroganceComplex#2659:**
-
-<https://rentry.org/STAI-Termux>
+Since SillyTavern is only a user interface, it has tiny hardware requirements, it will run on anything. It's the AI system backend that needs to be powerful.
 
 ## Questions or suggestions?
 
 ### We now have a community Discord server
 
-Get support, share favorite characters and prompts:
+| [![][discord-shield-badge]][discord-link] | [Join our Discord community!](https://discord.gg/sillytavern) Get support, share favorite characters and prompts. |
+| :---------------------------------------- | :----------------------------------------------------------------------------------------------------------------- |
 
-### [Join](https://discord.gg/RZdyAEUPvj)
-
-***
-
-Get in touch with the developers directly:
+Or get in touch with the developers directly:
 
 * Discord: cohee or rossascends
-* Reddit: /u/RossAscends or /u/sillylossy
+* Reddit: [/u/RossAscends](https://www.reddit.com/user/RossAscends/) or [/u/sillylossy](https://www.reddit.com/user/sillylossy/)
 * [Post a GitHub issue](https://github.com/SillyTavern/SillyTavern/issues)
 
 ## This version includes
@@ -62,7 +64,7 @@ Get in touch with the developers directly:
 * A heavily modified TavernAI 1.2.8 (more than 50% of code rewritten or optimized)
 * Swipes
 * Group chats: multi-bot rooms for characters to talk to you or each other
-* Chat bookmarks / branching (duplicates the dialogue in its current state)
+* Chat checkpoints / branching
 * Advanced KoboldAI / TextGen generation settings with a lot of community-made presets
 * World Info support: create rich lore or save tokens on your character card
 * [OpenRouter](https://openrouter.ai) connection for various APIs (Claude, GPT-4/3.5 and more)
@@ -80,9 +82,8 @@ SillyTavern has extensibility support, with some additional AI modules hosted vi
 * Sending images to chat, and the AI interpreting the content
 * Stable Diffusion image generation (5 chat-related presets plus 'free mode')
 * Text-to-speech for AI response messages (via ElevenLabs, Silero, or the OS's System TTS)
-* ChromaDB vector storage for smarter chat prompt formatting
 
-A full list of included extensions and tutorials on how to use them can be found in the [Docs](https://docs.sillytavern.app/extras/extensions/).
+A full list of included extensions and tutorials on how to use them can be found in the [Docs](https://docs.sillytavern.app/).
 
 ## UI/CSS/Quality of Life tweaks by RossAscends
 
@@ -119,58 +120,161 @@ A full list of included extensions and tutorials on how to use them can be found
   * Customizable page colors for 'main text', 'quoted text', and 'italics text'.
   * Customizable UI background color and blur amount
 
-## Installation
+# ⌛ Installation
 
-*NOTE: This software is intended for local install purposes, and has not been thoroughly tested on a colab or other cloud notebook service.*
+> \[!WARNING]
+> * DO NOT INSTALL INTO ANY WINDOWS CONTROLLED FOLDER (Program Files, System32, etc).
+> * DO NOT RUN START.BAT WITH ADMIN PERMISSIONS
+> * INSTALLATION ON WINDOWS 7 IS IMPOSSIBLE AS IT CAN NOT RUN NODEJS 18.16
 
-> **Warning**
+## 🪟 Windows
 
-> DO NOT INSTALL INTO ANY WINDOWS CONTROLLED FOLDER (Program Files, System32, etc).
-
-> DO NOT RUN START.BAT WITH ADMIN PERMISSIONS
-
-### Windows
-
-Installing via Git (recommended for easy updating)
-
-An easy-to-follow guide with pretty pictures:
-<https://docs.sillytavern.app/installation/windows/>
-
+## Installing via Git
   1. Install [NodeJS](https://nodejs.org/en) (latest LTS version is recommended)
-  2. Install [GitHub Desktop](https://central.github.com/deployments/desktop/desktop/latest/win32)
+  2. Install [Git for Windows](https://gitforwindows.org/)
   3. Open Windows Explorer (`Win+E`)
   4. Browse to or Create a folder that is not controlled or monitored by Windows. (ex: C:\MySpecialFolder\)
   5. Open a Command Prompt inside that folder by clicking in the 'Address Bar' at the top, typing `cmd`, and pressing Enter.
   6. Once the black box (Command Prompt) pops up, type ONE of the following into it and press Enter:
 
-* for Release Branch: `git clone https://github.com/SillyTavern/SillyTavern -b release`
-* for Staging Branch: `git clone https://github.com/SillyTavern/SillyTavern -b staging`
+- for Release Branch: `git clone https://github.com/SillyTavern/SillyTavern -b release`
+- for Staging Branch: `git clone https://github.com/SillyTavern/SillyTavern -b staging`
 
   7. Once everything is cloned, double-click `Start.bat` to make NodeJS install its requirements.
   8. The server will then start, and SillyTavern will pop up in your browser.
 
-Installing via ZIP download (discouraged)
+## Installing via SillyTavern Launcher
+1.  On your keyboard: press **`WINDOWS + R`** to open Run dialog box. Then, run the following command to install git:
+```shell
+cmd /c winget install -e --id Git.Git
+```
+2. On your keyboard: press **`WINDOWS + E`** to open File Explorer, then navigate to the folder where you want to install the launcher. Once in the desired folder, type `cmd` into the address bar and press enter. Then, run the following command:
+```shell
+git clone https://github.com/SillyTavern/SillyTavern-Launcher.git && cd SillyTavern-Launcher && start installer.bat
+```
 
+## Installing via GitHub Desktop
+(This allows git usage **only** in GitHub Desktop, if you want to use `git` on the command line too, you also need to install [Git for Windows](https://gitforwindows.org/))
   1. Install [NodeJS](https://nodejs.org/en) (latest LTS version is recommended)
-  2. Download the zip from this GitHub repo. (Get the `Source code (zip)` from [Releases](https://github.com/SillyTavern/SillyTavern/releases/latest))
-  3. Unzip it into a folder of your choice
-  4. Run `Start.bat` by double-clicking or in a command line.
-  5. Once the server has prepared everything for you, it will open a tab in your browser.
+  2. Install [GitHub Desktop](https://central.github.com/deployments/desktop/desktop/latest/win32)
+  3. After installing GitHub Desktop, click on `Clone a repository from the internet....` (Note: You **do NOT need** to create a GitHub account for this step)
+  4. On the menu, click the URL tab, enter this URL `https://github.com/SillyTavern/SillyTavern`, and click Clone. You can change the Local path to change where SillyTavern is going to be downloaded.
+  6. To open SillyTavern, use Windows Explorer to browse into the folder where you cloned the repository. By default, the repository will be cloned here: `C:\Users\[Your Windows Username]\Documents\GitHub\SillyTavern`
+  7. Double-click on the `start.bat` file. (Note: the `.bat` part of the file name might be hidden by your OS, in that case, it will look like a file called "`Start`". This is what you double-click to run SillyTavern)
+  8. After double-clicking, a large black command console window should open and SillyTavern will begin to install what it needs to operate.
+  9. After the installation process, if everything is working, the command console window should look like this and a SillyTavern tab should be open in your browser:
+  10. Connect to any of the [supported APIs](https://docs.sillytavern.app/usage/api-connections/) and start chatting!
 
-### Linux
+## 🐧 Linux & 🍎 MacOS
 
-  1. Run the `start.sh` script.
-  2. Enjoy.
+For MacOS / Linux all of these will be done in a Terminal.
+
+1. Install git and nodeJS (the method for doing this will vary depending on your OS)
+2. Clone the repo
+
+- for Release Branch: `git clone https://github.com/SillyTavern/SillyTavern -b release`
+- for Staging Branch: `git clone https://github.com/SillyTavern/SillyTavern -b staging`
+
+3. `cd SillyTavern` to navigate into the install folder.
+4. Run the `start.sh` script with one of these commands:
+
+- `./start.sh`
+- `bash start.sh`
+
+## Installing via SillyTavern Launcher
+
+### For Linux users
+1. Open your favorite terminal and install git
+2. Git clone the Sillytavern-Launcher with: 
+```shell
+git clone https://github.com/SillyTavern/SillyTavern-Launcher.git && cd SillyTavern-Launcher
+```
+3. Start the installer.sh with: 
+```shell
+chmod +x install.sh && ./install.sh
+```
+4. After installation start the launcher.sh with: 
+```shell
+chmod +x launcher.sh && ./launcher.sh
+```
+
+### For Mac users
+1. Open a terminal and install brew with: 
+```shell
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+2. Install git with: 
+```shell
+brew install git
+```
+3. Git clone the Sillytavern-Launcher with: 
+```shell
+git clone https://github.com/SillyTavern/SillyTavern-Launcher.git && cd SillyTavern-Launcher
+```
+4. Start the installer.sh with: 
+```shell
+chmod +x install.sh && ./install.sh
+```
+5. After installation start the launcher.sh with: 
+```shell
+chmod +x launcher.sh && ./launcher.sh
+```
+
+## 🐋 Installing via Docker
+
+These instructions assume you have installed Docker, are able to access your command line for the installation of containers, and familiar with their general operation.
+
+### Building the image yourself
+
+We have a comprehensive guide on using SillyTavern in Docker [here](http://docs.sillytavern.app/installation/docker/) which covers installations on Windows, macOS and Linux! Give it a read if you wish to build the image yourself.
+
+### Using the GitHub Container Registry (easiest)
+
+You will need two mandatory directory mappings and a port mapping to allow SillyTavern to function. In the command, replace your selections in the following places:
+
+#### Container Variables
+
+##### Volume Mappings
+
+- [config] - The directory where SillyTavern configuration files will be stored on your host machine
+- [data] - The directory where SillyTavern user data (including characters) will be stored on your host machine
+- [plugins] - (optional) The directory where SillyTavern server plugins will be stored on your host machine
+
+##### Port Mappings
+
+- [PublicPort] - The port to expose the traffic on. This is mandatory, as you will be accessing the instance from outside of its virtual machine container. DO NOT expose this to the internet without implementing a separate service for security.
+
+##### Additional Settings
+
+- [TimeZone] - The timezone your instance should use. This is useful for making logs match your local time for easier troubleshooting. Use your TZ Identifier. (https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)
+- [DockerNet] - The docker network that the container should be created with a connection to. If you don't know what it is, see the [official Docker documentation](https://docs.docker.com/reference/cli/docker/network/).
+- [version] - On the right-hand side of this GitHub page, you'll see "Packages". Select the "sillytavern" package and you'll see the image versions. The image tag "latest" will keep you up-to-date with the current release. You can also utilize "staging" and "release" tags that point to the nightly images of the respective branches, but this may not be appropriate, if you are utilizing extensions that could be broken, and may need time to update.
+
+#### Install command
+
+1. Open your Command Line
+2. Run the following command
+
+`docker create --name='sillytavern' --net='[DockerNet]' -e TZ="[TimeZone]" -p '8000:8000/tcp' -v '[plugins]':'/home/node/app/plugins':'rw' -v '[config]':'/home/node/app/config':'rw' -v '[data]':'/home/node/app/data':'rw' 'ghcr.io/sillytavern/sillytavern:[version]'`
+
+> Note that 8000 is a default listening port. Don't forget to use an appropriate port if you change it in the config.
+
+## 📱 Mobile - Installing via termux
+
+> \[!NOTE]
+> **SillyTavern can be run natively on Android phones using Termux. Please refer to this guide by ArroganceComplex#2659:**
+> * <https://rentry.org/STAI-Termux>
+
 
 ## API keys management
 
-SillyTavern saves your API keys to a `secrets.json` file in the server directory.
+SillyTavern saves your API keys to a `secrets.json` file in the user data directory (`/data/default-user/secrets.json` is the default path).
 
 By default, they will not be exposed to a frontend after you enter them and reload the page.
 
 In order to enable viewing your keys by clicking a button in the API block:
 
-1. Set the value of `allowKeysExposure` to `true` in `config.conf` file.
+1. Set the value of `allowKeysExposure` to `true` in `config.yaml` file.
 2. Restart the SillyTavern server.
 
 ## Remote connections
@@ -179,7 +283,7 @@ Most often this is for people who want to use SillyTavern on their mobile phones
 
 However, it can be used to allow remote connections from anywhere as well.
 
-**IMPORTANT: SillyTavern is a single-user program, so anyone who logs in will be able to see all characters and chats, and be able to change any settings inside the UI.**
+**IMPORTANT: Refer to the official guide if you want to configure SillyTavern user accounts with (optional) password protection: [Users](https://docs.sillytavern.app/installation/st-1.12.0-migration-guide/#users).**
 
 ### 1. Managing whitelisted IPs
 
@@ -204,11 +308,11 @@ or
 CIDR masks are also accepted (eg. 10.0.0.0/24).
 
 * Save the `whitelist.txt` file.
-* Restart your TAI server.
+* Restart your ST server.
 
 Now devices which have the IP specified in the file will be able to connect.
 
-*Note: `config.conf` also has a `whitelist` array, which you can use in the same way, but this array will be ignored if `whitelist.txt` exists.*
+*Note: `config.yaml` also has a `whitelist` array, which you can use in the same way, but this array will be ignored if `whitelist.txt` exists.*
 
 ### 2. Getting the IP for the ST host machine
 
@@ -220,7 +324,7 @@ If the ST-hosting device is on the same wifi network, you will use the ST-host's
 
 If you (or someone else) want to connect to your hosted ST while not being on the same network, you will need the public IP of your ST-hosting device.
 
-* While using the ST-hosting device, access [this page](https://whatismyipaddress.com/) and look for for `IPv4`. This is what you would use to connect from the remote device.
+* While using the ST-hosting device, access [this page](https://whatismyipaddress.com/) and look for `IPv4`. This is what you would use to connect from the remote device.
 
 ### 3. Connect the remote device to the ST host machine
 
@@ -234,19 +338,19 @@ Use http:// NOT https://
 
 ### Opening your ST to all IPs
 
-We do not recommend doing this, but you can open `config.conf` and change `whitelist` to `false`.
+We do not recommend doing this, but you can open `config.yaml` and change `whitelistMode` to `false`.
 
 You must remove (or rename) `whitelist.txt` in the SillyTavern base install folder if it exists.
 
 This is usually an insecure practice, so we require you to set a username and password when you do this.
 
-The username and password are set in `config.conf`.
+The username and password are set in `config.yaml`.
 
 After restarting your ST server, any device will be able to connect to it, regardless of their IP as long as they know the username and password.
 
 ### Still Unable To Connect?
 
-* Create an inbound/outbound firewall rule for the port found in `config.conf`. Do NOT mistake this for port-forwarding on your router, otherwise, someone could find your chat logs and that's a big no-no.
+* Create an inbound/outbound firewall rule for the port found in `config.yaml`. Do NOT mistake this for port-forwarding on your router, otherwise, someone could find your chat logs and that's a big no-no.
 * Enable the Private Network profile type in Settings > Network and Internet > Ethernet. This is VERY important for Windows 11, otherwise, you would be unable to connect even with the aforementioned firewall rules.
 
 ## Performance issues?
@@ -275,10 +379,8 @@ You can find them archived here:
 
 <https://files.catbox.moe/1xevnc.zip>
 
-## Screenshots
 
-<img width="400" alt="image" src="https://user-images.githubusercontent.com/18619528/228649245-8061c60f-63dc-488e-9325-f151b7a3ec2d.png">
-<img width="400" alt="image" src="https://user-images.githubusercontent.com/18619528/228649856-fbdeef05-d727-4d5a-be80-266cbbc6b811.png">
+
 
 ## License and credits
 
@@ -287,7 +389,7 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU Affero General Public License for more details.**
 
-* TAI Base by Humi: Unknown license
+* TAI Base by Humi: MIT
 * Cohee's modifications and derived code: AGPL v3
 * RossAscends' additions: AGPL v3
 * Portions of CncAnon's TavernAITurbo mod: Unknown license
@@ -308,3 +410,11 @@ GNU Affero General Public License for more details.**
 * Korean translation by @doloroushyeonse
 * k_euler_a support for Horde by <https://github.com/Teashrock>
 * Chinese translation by [@XXpE3](https://github.com/XXpE3), 中文 ISSUES 可以联系 @XXpE3
+* Docker guide by [@mrguymiah](https://github.com/mrguymiah) and [@Bronya-Rand](https://github.com/Bronya-Rand)
+
+<!-- LINK GROUP -->
+[back-to-top]: https://img.shields.io/badge/-BACK_TO_TOP-151515?style=flat-square
+[cover]: https://github.com/SillyTavern/SillyTavern/assets/18619528/c2be4c3f-aada-4f64-87a3-ae35a68b61a4
+[discord-link]: https://discord.gg/sillytavern
+[discord-shield]: https://img.shields.io/discord/1100685673633153084?color=5865F2&label=discord&labelColor=black&logo=discord&logoColor=white&style=flat-square
+[discord-shield-badge]: https://img.shields.io/discord/1100685673633153084?color=5865F2&label=discord&labelColor=black&logo=discord&logoColor=white&style=for-the-badge

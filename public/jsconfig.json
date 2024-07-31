@@ -3,6 +3,7 @@
         "checkJs": true,
         "target": "ESNext",
         "module": "ESNext",
+        "moduleResolution": "node",
         "allowUmdGlobalAccess": true,
         "allowSyntheticDefaultImports": true
     },
@@ -22,7 +23,9 @@
             "droll",
             "handlebars",
             "highlight.js",
-            "localforage"
+            "localforage",
+            "pdfjs-dist",
+            "@mozilla/readability"
         ]
     }
 }

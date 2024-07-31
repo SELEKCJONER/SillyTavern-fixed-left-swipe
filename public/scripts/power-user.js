@@ -2,8 +2,6 @@ import {
     saveSettingsDebounced,
     scrollChatToBottom,
     characters,
-    callPopup,
-    getStatus,
     reloadMarkdownProcessor,
     reloadCurrentChat,
     getRequestHeaders,
@@ -11,26 +9,46 @@ import {
     eventSource,
     event_types,
     getCurrentChatId,
-    printCharacters,
+    printCharactersDebounced,
     setCharacterId,
     setEditedMessageId,
-    renderTemplate,
-} from "../script.js";
-import { isMobile, initMovingUI, favsToHotswap } from "./RossAscends-mods.js";
+    chat,
+    getFirstDisplayedMessageId,
+    showMoreMessages,
+    saveSettings,
+    saveChatConditional,
+    setAnimationDuration,
+    ANIMATION_DURATION_DEFAULT,
+    setActiveGroup,
+    setActiveCharacter,
+    entitiesFilter,
+    doNewChat,
+} from '../script.js';
+import { isMobile, initMovingUI, favsToHotswap } from './RossAscends-mods.js';
 import {
     groups,
     resetSelectedGroup,
-} from "./group-chats.js";
+} from './group-chats.js';
 import {
     instruct_presets,
     loadInstructMode,
     selectInstructPreset,
-} from "./instruct-mode.js";
+} from './instruct-mode.js';
 
-import { registerSlashCommand } from "./slash-commands.js";
-import { tokenizers } from "./tokenizers.js";
+import { getTagsList, tag_import_setting, tag_map, tags } from './tags.js';
+import { tokenizers } from './tokenizers.js';
+import { BIAS_CACHE } from './logit-bias.js';
+import { renderTemplateAsync } from './templates.js';
 
-import { countOccurrences, debounce, delay, isOdd, resetScrollHeight, sortMoments, timestampToMoment } from "./utils.js";
+import { countOccurrences, debounce, delay, download, getFileText, getStringHash, isOdd, isTrueBoolean, onlyUnique, resetScrollHeight, shuffle, sortMoments, stringToRange, timestampToMoment } from './utils.js';
+import { FILTER_TYPES } from './filters.js';
+import { PARSER_FLAG, SlashCommandParser } from './slash-commands/SlashCommandParser.js';
+import { SlashCommand } from './slash-commands/SlashCommand.js';
+import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from './slash-commands/SlashCommandArgument.js';
+import { AUTOCOMPLETE_WIDTH } from './autocomplete/AutoComplete.js';
+import { SlashCommandEnumValue, enumTypes } from './slash-commands/SlashCommandEnumValue.js';
+import { commonEnumProviders, enumIcons } from './slash-commands/SlashCommandCommonEnumsProvider.js';
+import { POPUP_TYPE, callGenericPopup } from './popup.js';
 
 export {
     loadPowerUserSettings,
@@ -41,36 +59,43 @@ export {
     fixMarkdown,
     power_user,
     send_on_enter_options,
+    getContextSettings,
 };
 
-export const MAX_CONTEXT_DEFAULT = 4096;
-const MAX_CONTEXT_UNLOCKED = 65536;
+export const MAX_CONTEXT_DEFAULT = 8192;
+export const MAX_RESPONSE_DEFAULT = 2048;
+const MAX_CONTEXT_UNLOCKED = 200 * 1024;
+const MAX_RESPONSE_UNLOCKED = 16 * 1024;
+const unlockedMaxContextStep = 512;
+const maxContextMin = 512;
+const maxContextStep = 64;
 
-const defaultStoryString = "{{#if system}}{{system}}\n{{/if}}{{#if description}}{{description}}\n{{/if}}{{#if personality}}{{char}}'s personality: {{personality}}\n{{/if}}{{#if scenario}}Scenario: {{scenario}}\n{{/if}}{{#if persona}}{{persona}}\n{{/if}}";
+const defaultStoryString = '{{#if system}}{{system}}\n{{/if}}{{#if description}}{{description}}\n{{/if}}{{#if personality}}{{char}}\'s personality: {{personality}}\n{{/if}}{{#if scenario}}Scenario: {{scenario}}\n{{/if}}{{#if persona}}{{persona}}\n{{/if}}';
 const defaultExampleSeparator = '***';
 const defaultChatStart = '***';
 
 export const ui_mode = {
     SIMPLE: 0,
     POWER: 1,
-}
+};
 
 const avatar_styles = {
     ROUND: 0,
     RECTANGULAR: 1,
-}
+    SQUARE: 2,
+};
 
 export const chat_styles = {
     DEFAULT: 0,
     BUBBLES: 1,
     DOCUMENT: 2,
-}
+};
 
 const send_on_enter_options = {
     DISABLED: -1,
     AUTO: 0,
     ENABLED: 1,
-}
+};
 
 export const persona_description_positions = {
     IN_PROMPT: 0,
@@ -80,7 +105,8 @@ export const persona_description_positions = {
     AFTER_CHAR: 1,
     TOP_AN: 2,
     BOTTOM_AN: 3,
-}
+    AT_DEPTH: 4,
+};
 
 let power_user = {
     tokenizer: tokenizers.BEST_MATCH,
@@ -99,6 +125,10 @@ let power_user = {
         target_length: 400,
     },
     markdown_escape_strings: '',
+    chat_truncation: 100,
+    streaming_fps: 30,
+    smooth_streaming: false,
+    smooth_streaming_speed: 50,
 
     ui_mode: ui_mode.POWER,
     fast_ui_mode: true,
@@ -121,6 +151,7 @@ let power_user = {
 
     main_text_color: `${getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeBodyColor').trim()}`,
     italics_text_color: `${getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeEmColor').trim()}`,
+    underline_text_color: `${getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeUnderlineColor').trim()}`,
     quote_text_color: `${getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeQuoteColor').trim()}`,
     blur_tint_color: `${getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeBlurTintColor').trim()}`,
     chat_tint_color: `${getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeChatTintColor').trim()}`,
@@ -131,7 +162,6 @@ let power_user = {
 
     custom_css: '',
 
-
     waifuMode: false,
     movingUI: false,
     movingUIState: {},
@@ -139,7 +169,7 @@ let power_user = {
     noShadows: false,
     theme: 'Default (Dark) 1.7.1',
 
-
+    gestures: true,
     auto_swipe: false,
     auto_swipe_minimum_length: 0,
     auto_swipe_blacklist: [],
@@ -148,6 +178,8 @@ let power_user = {
     auto_fix_generated_markdown: true,
     send_on_enter: send_on_enter_options.AUTO,
     console_log_prompts: false,
+    request_token_probabilities: false,
+    show_group_chat_queue: false,
     render_formulas: false,
     allow_name1_display: false,
     allow_name2_display: false,
@@ -156,35 +188,50 @@ let power_user = {
     timestamps_enabled: true,
     timestamp_model_icon: false,
     mesIDDisplay_enabled: false,
+    hideChatAvatars_enabled: false,
     max_context_unlocked: false,
     message_token_count_enabled: false,
     expand_message_actions: false,
+    enableZenSliders: false,
+    enableLabMode: false,
     prefer_character_prompt: true,
     prefer_character_jailbreak: true,
     quick_continue: false,
     continue_on_send: false,
     trim_spaces: true,
     relaxed_api_urls: false,
+    world_import_dialog: true,
+    tag_import_setting: tag_import_setting.ASK,
     disable_group_trimming: false,
+    single_line: false,
 
     default_instruct: '',
     instruct: {
         enabled: false,
-        preset: "Alpaca",
-        system_prompt: "Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\nWrite {{char}}'s next reply in a fictional roleplay chat between {{user}} and {{char}}.\n",
-        input_sequence: "### Instruction:",
-        output_sequence: "### Response:",
-        first_output_sequence: "",
-        last_output_sequence: "",
-        system_sequence_prefix: "",
-        system_sequence_suffix: "",
-        stop_sequence: "",
-        separator_sequence: "",
+        preset: 'Alpaca',
+        system_prompt: 'Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\nWrite {{char}}\'s next reply in a fictional roleplay chat between {{user}} and {{char}}.\n',
+        input_sequence: '### Instruction:',
+        input_suffix: '',
+        output_sequence: '### Response:',
+        output_suffix: '',
+        system_sequence: '',
+        system_suffix: '',
+        last_system_sequence: '',
+        first_output_sequence: '',
+        last_output_sequence: '',
+        system_sequence_prefix: '',
+        system_sequence_suffix: '',
+        stop_sequence: '',
         wrap: true,
         macro: true,
         names: false,
         names_force_groups: true,
-        activation_regex: "",
+        activation_regex: '',
+        bind_to_context: false,
+        user_alignment_message: '',
+        system_same_as_user: false,
+        /** @deprecated Use output_suffix instead */
+        separator_sequence: '',
     },
 
     default_context: 'Default',
@@ -193,6 +240,8 @@ let power_user = {
         story_string: defaultStoryString,
         chat_start: defaultChatStart,
         example_separator: defaultExampleSeparator,
+        use_stop_strings: true,
+        allow_jailbreak: false,
     },
 
     personas: {},
@@ -201,13 +250,46 @@ let power_user = {
 
     persona_description: '',
     persona_description_position: persona_description_positions.IN_PROMPT,
+    persona_description_role: 0,
+    persona_description_depth: 2,
     persona_show_notifications: true,
+    persona_sort_order: 'asc',
 
     custom_stopping_strings: '',
     custom_stopping_strings_macro: true,
     fuzzy_search: false,
     encode_tags: false,
     servers: [],
+    bogus_folders: false,
+    zoomed_avatar_magnification: false,
+    show_tag_filters: false,
+    aux_field: 'character_version',
+    stscript: {
+        matching: 'fuzzy',
+        autocomplete: {
+            autoHide: false,
+            style: 'theme',
+            font: {
+                scale: 0.8,
+            },
+            width: {
+                left: AUTOCOMPLETE_WIDTH.CHAT,
+                right: AUTOCOMPLETE_WIDTH.CHAT,
+            },
+        },
+        parser: {
+            /**@type {Object.<PARSER_FLAG,boolean>} */
+            flags: {},
+        },
+    },
+    restore_user_input: true,
+    reduced_motion: false,
+    compact_input_area: true,
+    auto_connect: false,
+    auto_load_chat: false,
+    forbid_external_media: true,
+    external_media_allowed_overrides: [],
+    external_media_forbidden_overrides: [],
 };
 
 let themes = [];
@@ -215,43 +297,68 @@ let movingUIPresets = [];
 export let context_presets = [];
 
 const storage_keys = {
-    fast_ui_mode: "TavernAI_fast_ui_mode",
-    avatar_style: "TavernAI_avatar_style",
-    chat_display: "TavernAI_chat_display",
-    chat_width: "chat_width",
-    font_scale: "TavernAI_font_scale",
+    fast_ui_mode: 'TavernAI_fast_ui_mode',
+    avatar_style: 'TavernAI_avatar_style',
+    chat_display: 'TavernAI_chat_display',
+    chat_width: 'chat_width',
+    font_scale: 'TavernAI_font_scale',
 
-    main_text_color: "TavernAI_main_text_color",
-    italics_text_color: "TavernAI_italics_text_color",
-    quote_text_color: "TavernAI_quote_text_color",
-    blur_tint_color: "TavernAI_blur_tint_color",
-    chat_tint_color: "TavernAI_chat_tint_color",
-    user_mes_blur_tint_color: "TavernAI_user_mes_blur_tint_color",
-    bot_mes_blur_tint_color: "TavernAI_bot_mes_blur_tint_color",
-    blur_strength: "TavernAI_blur_strength",
-    shadow_color: "TavernAI_shadow_color",
-    shadow_width: "TavernAI_shadow_width",
-    border_color: "TavernAI_border_color",
+    main_text_color: 'TavernAI_main_text_color',
+    italics_text_color: 'TavernAI_italics_text_color',
+    underline_text_color: 'TavernAI_underline_text_color',
+    quote_text_color: 'TavernAI_quote_text_color',
+    blur_tint_color: 'TavernAI_blur_tint_color',
+    chat_tint_color: 'TavernAI_chat_tint_color',
+    user_mes_blur_tint_color: 'TavernAI_user_mes_blur_tint_color',
+    bot_mes_blur_tint_color: 'TavernAI_bot_mes_blur_tint_color',
+    blur_strength: 'TavernAI_blur_strength',
+    shadow_color: 'TavernAI_shadow_color',
+    shadow_width: 'TavernAI_shadow_width',
+    border_color: 'TavernAI_border_color',
 
-    custom_css: "TavernAI_custom_css",
+    custom_css: 'TavernAI_custom_css',
 
-    waifuMode: "TavernAI_waifuMode",
-    movingUI: "TavernAI_movingUI",
-    noShadows: "TavernAI_noShadows",
+    waifuMode: 'TavernAI_waifuMode',
+    movingUI: 'TavernAI_movingUI',
+    noShadows: 'TavernAI_noShadows',
 
     hotswap_enabled: 'HotswapEnabled',
     timer_enabled: 'TimerEnabled',
     timestamps_enabled: 'TimestampsEnabled',
     timestamp_model_icon: 'TimestampModelIcon',
     mesIDDisplay_enabled: 'mesIDDisplayEnabled',
+    hideChatAvatars_enabled: 'hideChatAvatarsEnabled',
     message_token_count_enabled: 'MessageTokenCountEnabled',
     expand_message_actions: 'ExpandMessageActions',
+    enableZenSliders: 'enableZenSliders',
+    enableLabMode: 'enableLabMode',
+    reduced_motion: 'reduced_motion',
+    compact_input_area: 'compact_input_area',
+    auto_connect_legacy: 'AutoConnectEnabled',
+    auto_load_chat_legacy: 'AutoLoadChatEnabled',
+
+    storyStringValidationCache: 'StoryStringValidationCache',
 };
+
+const contextControls = [
+    // Power user context scoped settings
+    { id: 'context_story_string', property: 'story_string', isCheckbox: false, isGlobalSetting: false },
+    { id: 'context_example_separator', property: 'example_separator', isCheckbox: false, isGlobalSetting: false },
+    { id: 'context_chat_start', property: 'chat_start', isCheckbox: false, isGlobalSetting: false },
+    { id: 'context_use_stop_strings', property: 'use_stop_strings', isCheckbox: true, isGlobalSetting: false, defaultValue: false },
+    { id: 'context_allow_jailbreak', property: 'allow_jailbreak', isCheckbox: true, isGlobalSetting: false, defaultValue: false },
+
+    // Existing power user settings
+    { id: 'always-force-name2-checkbox', property: 'always_force_name2', isCheckbox: true, isGlobalSetting: true, defaultValue: true },
+    { id: 'trim_sentences_checkbox', property: 'trim_sentences', isCheckbox: true, isGlobalSetting: true, defaultValue: false },
+    { id: 'include_newline_checkbox', property: 'include_newline', isCheckbox: true, isGlobalSetting: true, defaultValue: false },
+    { id: 'single_line', property: 'single_line', isCheckbox: true, isGlobalSetting: true, defaultValue: false },
+];
 
 let browser_has_focus = true;
 const debug_functions = [];
 
-const setHotswapsDebounced = debounce(favsToHotswap, 500);
+const setHotswapsDebounced = debounce(favsToHotswap);
 
 export function switchSimpleMode() {
     $('[data-newbie-hidden]').each(function () {
@@ -285,7 +392,7 @@ function playMessageSound() {
  * collapseNewlines("\n\n\n"); // "\n"
  */
 function collapseNewlines(x) {
-    return x.replaceAll(/\n+/g, "\n");
+    return x.replaceAll(/\n+/g, '\n');
 }
 
 /**
@@ -307,7 +414,7 @@ function collapseNewlines(x) {
  */
 function fixMarkdown(text, forDisplay) {
     // Find pairs of formatting characters and capture the text in between them
-    const format = /([\*_]{1,2})([\s\S]*?)\1/gm;
+    const format = /([*_]{1,2})([\s\S]*?)\1/gm;
     let matches = [];
     let match;
     while ((match = format.exec(text)) !== null) {
@@ -348,139 +455,600 @@ function fixMarkdown(text, forDisplay) {
 
 function switchHotswap() {
     const value = localStorage.getItem(storage_keys.hotswap_enabled);
-    power_user.hotswap_enabled = value === null ? true : value == "true";
-    $("body").toggleClass("no-hotswap", !power_user.hotswap_enabled);
-    $("#hotswapEnabled").prop("checked", power_user.hotswap_enabled);
+    power_user.hotswap_enabled = value === null ? true : value == 'true';
+    $('body').toggleClass('no-hotswap', !power_user.hotswap_enabled);
+    $('#hotswapEnabled').prop('checked', power_user.hotswap_enabled);
 }
 
 function switchTimer() {
     const value = localStorage.getItem(storage_keys.timer_enabled);
-    power_user.timer_enabled = value === null ? true : value == "true";
-    $("body").toggleClass("no-timer", !power_user.timer_enabled);
-    $("#messageTimerEnabled").prop("checked", power_user.timer_enabled);
+    power_user.timer_enabled = value === null ? true : value == 'true';
+    $('body').toggleClass('no-timer', !power_user.timer_enabled);
+    $('#messageTimerEnabled').prop('checked', power_user.timer_enabled);
 }
 
 function switchTimestamps() {
     const value = localStorage.getItem(storage_keys.timestamps_enabled);
-    power_user.timestamps_enabled = value === null ? true : value == "true";
-    $("body").toggleClass("no-timestamps", !power_user.timestamps_enabled);
-    $("#messageTimestampsEnabled").prop("checked", power_user.timestamps_enabled);
+    power_user.timestamps_enabled = value === null ? true : value == 'true';
+    $('body').toggleClass('no-timestamps', !power_user.timestamps_enabled);
+    $('#messageTimestampsEnabled').prop('checked', power_user.timestamps_enabled);
 }
 
 function switchIcons() {
     const value = localStorage.getItem(storage_keys.timestamp_model_icon);
-    power_user.timestamp_model_icon = value === null ? true : value == "true";
-    $("body").toggleClass("no-modelIcons", !power_user.timestamp_model_icon);
-    $("#messageModelIconEnabled").prop("checked", power_user.timestamp_model_icon);
+    power_user.timestamp_model_icon = value === null ? true : value == 'true';
+    $('body').toggleClass('no-modelIcons', !power_user.timestamp_model_icon);
+    $('#messageModelIconEnabled').prop('checked', power_user.timestamp_model_icon);
 }
 
 function switchTokenCount() {
     const value = localStorage.getItem(storage_keys.message_token_count_enabled);
-    power_user.message_token_count_enabled = value === null ? false : value == "true";
-    $("body").toggleClass("no-tokenCount", !power_user.message_token_count_enabled);
-    $("#messageTokensEnabled").prop("checked", power_user.message_token_count_enabled);
+    power_user.message_token_count_enabled = value === null ? false : value == 'true';
+    $('body').toggleClass('no-tokenCount', !power_user.message_token_count_enabled);
+    $('#messageTokensEnabled').prop('checked', power_user.message_token_count_enabled);
 }
 
 function switchMesIDDisplay() {
     const value = localStorage.getItem(storage_keys.mesIDDisplay_enabled);
-    let before = power_user.mesIDDisplay_enabled;
-    power_user.mesIDDisplay_enabled = value === null ? true : value == "true";
+    power_user.mesIDDisplay_enabled = value === null ? true : value == 'true';
     /*     console.log(`
         localstorage value:${value},
         poweruser before:${before},
         poweruser after:${power_user.mesIDDisplay_enabled}`) */
-    $("body").toggleClass("no-mesIDDisplay", !power_user.mesIDDisplay_enabled);
-    $("#mesIDDisplayEnabled").prop("checked", power_user.mesIDDisplay_enabled);
+    $('body').toggleClass('no-mesIDDisplay', !power_user.mesIDDisplay_enabled);
+    $('#mesIDDisplayEnabled').prop('checked', power_user.mesIDDisplay_enabled);
+}
+
+function switchHideChatAvatars() {
+    const value = localStorage.getItem(storage_keys.hideChatAvatars_enabled);
+    power_user.hideChatAvatars_enabled = value === null ? false : value == 'true';
+    /*console.log(`
+        localstorage value:${value},
+        poweruser after:${power_user.hideChatAvatars_enabled}`)
+    */
+    $('body').toggleClass('hideChatAvatars', power_user.hideChatAvatars_enabled);
+    $('#hideChatAvatarsEnabled').prop('checked', power_user.hideChatAvatars_enabled);
 }
 
 function switchMessageActions() {
     const value = localStorage.getItem(storage_keys.expand_message_actions);
-    power_user.expand_message_actions = value === null ? false : value == "true";
-    $("body").toggleClass("expandMessageActions", power_user.expand_message_actions);
-    $("#expandMessageActions").prop("checked", power_user.expand_message_actions);
+    power_user.expand_message_actions = value === null ? false : value == 'true';
+    $('body').toggleClass('expandMessageActions', power_user.expand_message_actions);
+    $('#expandMessageActions').prop('checked', power_user.expand_message_actions);
+    $('.extraMesButtons, .extraMesButtonsHint').removeAttr('style');
 }
 
+function switchReducedMotion() {
+    const value = localStorage.getItem(storage_keys.reduced_motion);
+    power_user.reduced_motion = value === null ? false : value == 'true';
+    jQuery.fx.off = power_user.reduced_motion;
+    const overrideDuration = power_user.reduced_motion ? 0 : ANIMATION_DURATION_DEFAULT;
+    setAnimationDuration(overrideDuration);
+    $('#reduced_motion').prop('checked', power_user.reduced_motion);
+    $('body').toggleClass('reduced-motion', power_user.reduced_motion);
+}
+
+function switchCompactInputArea() {
+    const value = localStorage.getItem(storage_keys.compact_input_area);
+    power_user.compact_input_area = value === null ? true : value == 'true';
+    $('#send_form').toggleClass('compact', power_user.compact_input_area);
+    $('#compact_input_area').prop('checked', power_user.compact_input_area);
+}
+
+var originalSliderValues = [];
+
+async function switchLabMode() {
+
+    /*     if (power_user.enableZenSliders && power_user.enableLabMode) {
+            toastr.warning("Can't start Lab Mode while Zen Sliders are active")
+            return
+            //$("#enableZenSliders").trigger('click')
+        }
+     */
+    await delay(100);
+    const value = localStorage.getItem(storage_keys.enableLabMode);
+    power_user.enableLabMode = value === null ? false : value == 'true';
+    $('body').toggleClass('enableLabMode', power_user.enableLabMode);
+    $('#enableLabMode').prop('checked', power_user.enableLabMode);
+
+    if (power_user.enableLabMode) {
+        //save all original slider values into an array
+        $('#advanced-ai-config-block input').each(function () {
+            let id = $(this).attr('id');
+            let min = $(this).attr('min');
+            let max = $(this).attr('max');
+            let step = $(this).attr('step');
+            originalSliderValues.push({ id, min, max, step });
+        });
+        //console.log(originalSliderValues)
+        //remove limits on all inputs and hide sliders
+        $('#advanced-ai-config-block input')
+            .attr('min', '-99999')
+            .attr('max', '99999')
+            .attr('step', '0.001');
+        $('#labModeWarning').removeClass('displayNone');
+        //$("#advanced-ai-config-block input[type='range']").hide()
+
+        $('#amount_gen').attr('min', '1')
+            .attr('max', '99999')
+            .attr('step', '1');
+
+
+    } else {
+        //re apply the original sliders values to each input
+        originalSliderValues.forEach(function (slider) {
+            $('#' + slider.id)
+                .attr('min', slider.min)
+                .attr('max', slider.max)
+                .attr('step', slider.step)
+                .trigger('input');
+        });
+        $('#advanced-ai-config-block input[type=\'range\']').show();
+        $('#labModeWarning').addClass('displayNone');
+
+        $('#amount_gen').attr('min', '16')
+            .attr('max', '2048')
+            .attr('step', '1');
+    }
+}
+
+async function switchZenSliders() {
+    await delay(100);
+    const value = localStorage.getItem(storage_keys.enableZenSliders);
+    power_user.enableZenSliders = value === null ? false : value == 'true';
+    $('body').toggleClass('enableZenSliders', power_user.enableZenSliders);
+    $('#enableZenSliders').prop('checked', power_user.enableZenSliders);
+
+    if (power_user.enableZenSliders) {
+        $('#clickSlidersTips').hide();
+        $('#pro-settings-block input[type=\'number\']').hide();
+        //hide number inputs that are not 'seed' inputs
+        $(`#textgenerationwebui_api-settings :input[type='number']:not([id^='seed']):not([id^='n_']),
+            #kobold_api-settings :input[type='number']:not([id^='seed'])`).hide();
+        //hide original sliders
+        $(`#textgenerationwebui_api-settings input[type='range'],
+            #kobold_api-settings input[type='range'],
+            #pro-settings-block input[type='range']:not(#max_context)`) //exclude max context because its creation is handled by switchMaxContext()
+            .hide()
+            .each(function () {
+                //make a zen slider for each original slider
+                CreateZenSliders($(this));
+            });
+        //this is for when zensliders is toggled after pageload
+        switchMaxContextSize();
+    } else {
+        $('#clickSlidersTips').show();
+        revertOriginalSliders();
+    }
+
+    function revertOriginalSliders() {
+        $('#pro-settings-block input[type=\'number\']').show();
+        $(`#textgenerationwebui_api-settings input[type='number'],
+            #kobold_api-settings input[type='number']`).show();
+        $(`#textgenerationwebui_api-settings input[type='range'],
+            #kobold_api-settings input[type='range'],
+            #pro-settings-block input[type='range']`).each(function () {
+            $(this).show();
+        });
+        $('div[id$="_zenslider"]').remove();
+    }
+
+}
+async function CreateZenSliders(elmnt) {
+    var originalSlider = elmnt;
+    var sliderID = originalSlider.attr('id');
+    var sliderMin = Number(originalSlider.attr('min'));
+    var sliderMax = Number(originalSlider.attr('max'));
+    var sliderValue = originalSlider.val();
+    var sliderRange = sliderMax - sliderMin;
+    var numSteps = 20;
+    var decimals = 2;
+    var offVal, allVal;
+    var stepScale;
+    var steps;
+    if (sliderID == 'amount_gen') {
+        decimals = 0;
+        steps = [16, 50, 100, 150, 200, 256, 300, 400, 512, 1024];
+        sliderMin = 0;
+        sliderMax = steps.length - 1;
+        stepScale = 1;
+        numSteps = 10;
+        sliderValue = steps.indexOf(Number(sliderValue));
+        if (sliderValue === -1) { sliderValue = 4; } // default to '200' if origSlider has value we can't use
+    }
+    if (sliderID == 'rep_pen_range_textgenerationwebui') {
+        if (power_user.max_context_unlocked) {
+            steps = [0, 256, 512, 768, 1024, 2048, 4096, 8192, 16355, 24576, 32768, 49152, 65536, -1];
+            numSteps = 13;
+            allVal = 13;
+        } else {
+            steps = [0, 256, 512, 768, 1024, 2048, 4096, 8192, -1];
+            numSteps = 8;
+            allVal = 8;
+        }
+        decimals = 0;
+        offVal = 0;
+        sliderMin = 0;
+        sliderMax = steps.length - 1;
+        stepScale = 1;
+        sliderValue = steps.indexOf(Number(sliderValue));
+        if (sliderValue === -1) { sliderValue = allVal; } // default to allValue if origSlider has value we can't use
+    }
+    //customize decimals
+    if (sliderID == 'max_context' ||
+        sliderID == 'mirostat_mode_textgenerationwebui' ||
+        sliderID == 'mirostat_tau_textgenerationwebui' ||
+        sliderID == 'top_k_textgenerationwebui' ||
+        sliderID == 'num_beams_textgenerationwebui' ||
+        sliderID == 'no_repeat_ngram_size_textgenerationwebui' ||
+        sliderID == 'min_length_textgenerationwebui' ||
+        sliderID == 'top_k' ||
+        sliderID == 'mirostat_mode_kobold' ||
+        sliderID == 'rep_pen_range' ||
+        sliderID == 'dry_allowed_length_textgenerationwebui' ||
+        sliderID == 'rep_pen_decay_textgenerationwebui' ||
+        sliderID == 'dry_penalty_last_n_textgenerationwebui' ||
+        sliderID == 'max_tokens_second_textgenerationwebui') {
+        decimals = 0;
+    }
+    if (sliderID == 'min_temp_textgenerationwebui' ||
+        sliderID == 'max_temp_textgenerationwebui' ||
+        sliderID == 'dynatemp_exponent_textgenerationwebui' ||
+        sliderID == 'smoothing_curve_textgenerationwebui' ||
+        sliderID == 'smoothing_factor_textgenerationwebui' ||
+        sliderID == 'dry_multiplier_textgenerationwebui' ||
+        sliderID == 'dry_base_textgenerationwebui') {
+        decimals = 2;
+    }
+    if (sliderID == 'eta_cutoff_textgenerationwebui' ||
+        sliderID == 'epsilon_cutoff_textgenerationwebui') {
+        numSteps = 50;
+        decimals = 1;
+    }
+    //customize steps
+    if (sliderID == 'mirostat_mode_textgenerationwebui' ||
+        sliderID == 'mirostat_mode_kobold') {
+        numSteps = 2;
+    }
+    if (sliderID == 'encoder_rep_pen_textgenerationwebui') {
+        numSteps = 14;
+    }
+    if (sliderID == 'max_context') {
+        numSteps = 15;
+    }
+    if (sliderID == 'mirostat_tau_textgenerationwebui' ||
+        sliderID == 'top_k_textgenerationwebui' ||
+        sliderID == 'num_beams_textgenerationwebui' ||
+        sliderID == 'no_repeat_ngram_size_textgenerationwebui' ||
+        sliderID == 'epsilon_cutoff_textgenerationwebui' ||
+        sliderID == 'tfs_textgenerationwebui' ||
+        sliderID == 'min_p_textgenerationwebui' ||
+        sliderID == 'temp_textgenerationwebui' ||
+        sliderID == 'temp') {
+        numSteps = 20;
+    }
+    if (sliderID == 'mirostat_eta_textgenerationwebui' ||
+        sliderID == 'penalty_alpha_textgenerationwebui' ||
+        sliderID == 'length_penalty_textgenerationwebui' ||
+        sliderID == 'min_temp_textgenerationwebui' ||
+        sliderID == 'max_temp_textgenerationwebui') {
+        numSteps = 50;
+    }
+    //customize off values
+    if (sliderID == 'presence_pen_textgenerationwebui' ||
+        sliderID == 'freq_pen_textgenerationwebui' ||
+        sliderID == 'mirostat_mode_textgenerationwebui' ||
+        sliderID == 'mirostat_mode_kobold' ||
+        sliderID == 'mirostat_tau_textgenerationwebui' ||
+        sliderID == 'mirostat_tau_kobold' ||
+        sliderID == 'mirostat_eta_textgenerationwebui' ||
+        sliderID == 'mirostat_eta_kobold' ||
+        sliderID == 'min_p_textgenerationwebui' ||
+        sliderID == 'min_p' ||
+        sliderID == 'no_repeat_ngram_size_textgenerationwebui' ||
+        sliderID == 'penalty_alpha_textgenerationwebui' ||
+        sliderID == 'length_penalty_textgenerationwebui' ||
+        sliderID == 'epsilon_cutoff_textgenerationwebui' ||
+        sliderID == 'rep_pen_range' ||
+        sliderID == 'eta_cutoff_textgenerationwebui' ||
+        sliderID == 'top_a_textgenerationwebui' ||
+        sliderID == 'top_a' ||
+        sliderID == 'top_k_textgenerationwebui' ||
+        sliderID == 'top_k' ||
+        sliderID == 'rep_pen_slope' ||
+        sliderID == 'smoothing_factor_textgenerationwebui' ||
+        sliderID == 'smoothing_curve_textgenerationwebui' ||
+        sliderID == 'skew_textgenerationwebui' ||
+        sliderID == 'dry_multiplier_textgenerationwebui' ||
+        sliderID == 'min_length_textgenerationwebui') {
+        offVal = 0;
+    }
+    if (sliderID == 'rep_pen_textgenerationwebui' ||
+        sliderID == 'rep_pen' ||
+        sliderID == 'tfs_textgenerationwebui' ||
+        sliderID == 'tfs' ||
+        sliderID == 'top_p_textgenerationwebui' ||
+        sliderID == 'top_p' ||
+        sliderID == 'typical_p_textgenerationwebui' ||
+        sliderID == 'typical_p' ||
+        sliderID == 'encoder_rep_pen_textgenerationwebui' ||
+        sliderID == 'temp_textgenerationwebui' ||
+        sliderID == 'temp' ||
+        sliderID == 'min_temp_textgenerationwebui' ||
+        sliderID == 'max_temp_textgenerationwebui' ||
+        sliderID == 'dynatemp_exponent_textgenerationwebui' ||
+        sliderID == 'guidance_scale_textgenerationwebui' ||
+        sliderID == 'rep_pen_slope_textgenerationwebui' ||
+        sliderID == 'guidance_scale') {
+        offVal = 1;
+    }
+    if (sliderID == 'guidance_scale_textgenerationwebui') {
+        numSteps = 78;
+    }
+    if (sliderID == 'top_k_textgenerationwebui') {
+        sliderMin = 0;
+    }
+    //customize amt gen steps
+    if (sliderID !== 'amount_gen' && sliderID !== 'rep_pen_range_textgenerationwebui') {
+        stepScale = sliderRange / numSteps;
+    }
+    var newSlider = $('<div>')
+        .attr('id', `${sliderID}_zenslider`)
+        .css('width', '100%')
+        .insertBefore(originalSlider);
+    newSlider.slider({
+        value: sliderValue,
+        step: stepScale,
+        min: sliderMin,
+        max: sliderMax,
+        create: async function () {
+            await delay(100);
+            var handle = $(this).find('.ui-slider-handle');
+            var handleText, stepNumber, leftMargin;
+
+            //handling creation of amt_gen
+            if (newSlider.attr('id') == 'amount_gen_zenslider') {
+                handleText = steps[sliderValue];
+                stepNumber = sliderValue;
+                leftMargin = ((stepNumber) / numSteps) * 50 * -1;
+                handle.text(handleText)
+                    .css('margin-left', `${leftMargin}px`);
+                //console.log(`${newSlider.attr('id')} initial value:${handleText}, stepNum:${stepNumber}, numSteps:${numSteps}, left-margin:${leftMargin}`)
+            }
+            //handling creation of rep_pen_range for ooba
+            else if (newSlider.attr('id') == 'rep_pen_range_textgenerationwebui_zenslider') {
+                if ($('#rep_pen_range_textgenerationwebui_zensliders').length !== 0) {
+                    $('#rep_pen_range_textgenerationwebui_zensliders').remove();
+                }
+                handleText = steps[sliderValue];
+                stepNumber = sliderValue;
+                leftMargin = ((stepNumber) / numSteps) * 50 * -1;
+                if (sliderValue === offVal) {
+                    handleText = 'Off';
+                    handle.css('color', 'rgba(128,128,128,0.5');
+                }
+                else if (sliderValue === allVal) { handleText = 'All'; }
+                else { handle.css('color', ''); }
+                handle.text(handleText)
+                    .css('margin-left', `${leftMargin}px`);
+                //console.log(sliderValue, handleText, offVal, allVal)
+                //console.log(`${newSlider.attr('id')} sliderValue = ${sliderValue}, handleText:${handleText}, stepNum:${stepNumber}, numSteps:${numSteps}, left-margin:${leftMargin}`)
+                originalSlider.val(steps[sliderValue]);
+            }
+            //create all other sliders
+            else {
+                var numVal = Number(sliderValue).toFixed(decimals);
+                offVal = Number(offVal).toFixed(decimals);
+                if (numVal === offVal) {
+                    handle.text('Off').css('color', 'rgba(128,128,128,0.5');
+                } else {
+                    handle.text(numVal).css('color', '');
+                }
+                stepNumber = ((sliderValue - sliderMin) / stepScale);
+                leftMargin = (stepNumber / numSteps) * 50 * -1;
+                originalSlider.val(numVal)
+                    .data('newSlider', newSlider);
+                //console.log(`${newSlider.attr('id')} sliderValue = ${sliderValue}, handleText:${handleText, numVal}, stepNum:${stepNumber}, numSteps:${numSteps}, left-margin:${leftMargin}`)
+                var isManualInput = false;
+                var valueBeforeManualInput;
+                handle.css('margin-left', `${leftMargin}px`)
+
+                    .attr('contenteditable', 'true')
+                    //these sliders need listeners for manual inputs
+                    .on('click', function () {
+                        //this just selects all the text in the handle so user can overwrite easily
+                        //needed because JQUery UI uses left/right arrow keys as well as home/end to move the slider..
+                        valueBeforeManualInput = newSlider.val();
+                        console.log(valueBeforeManualInput);
+                        let handleElement = handle.get(0);
+                        let range = document.createRange();
+                        range.selectNodeContents(handleElement);
+                        let selection = window.getSelection();
+                        selection.removeAllRanges();
+                        selection.addRange(range);
+                    })
+                    .on('keyup', function (e) {
+                        valueBeforeManualInput = numVal;
+                        //console.log(valueBeforeManualInput, numVal, handleText);
+                        isManualInput = true;
+                        //allow enter to trigger slider update
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handle.trigger('blur');
+                        }
+                    })
+                    //trigger slider changes when user clicks away
+                    .on('mouseup blur', function () {
+                        let manualInput = parseFloat(handle.text()).toFixed(decimals);
+                        if (isManualInput) {
+                            //disallow manual inputs outside acceptable range
+                            if (manualInput >= sliderMin && manualInput <= sliderMax) {
+                                //if value is ok, assign to slider and update handle text and position
+                                newSlider.val(manualInput);
+                                handleSlideEvent.call(newSlider, null, { value: parseFloat(manualInput) }, 'manual');
+                                valueBeforeManualInput = manualInput;
+                            } else {
+                                //if value not ok, warn and reset to last known valid value
+                                toastr.warning(`Invalid value. Must be between ${sliderMin} and ${sliderMax}`);
+                                console.log(valueBeforeManualInput);
+                                newSlider.val(valueBeforeManualInput);
+                                handle.text(valueBeforeManualInput);
+                                handleSlideEvent.call(newSlider, null, { value: parseFloat(valueBeforeManualInput) }, 'manual');
+                            }
+                        }
+                        isManualInput = false;
+                    });
+            }
+            //zenSlider creation done, hide the original
+            originalSlider.hide();
+        },
+        slide: handleSlideEvent,
+    });
+
+    function handleSlideEvent(event, ui, type) {
+        var handle = $(this).find('.ui-slider-handle');
+        var numVal = Number(ui.value).toFixed(decimals);
+        offVal = Number(offVal).toFixed(decimals);
+        allVal = Number(allVal).toFixed(decimals);
+        console.log(numVal, sliderMin, sliderMax, numVal > sliderMax, numVal < sliderMin);
+        if (numVal > sliderMax) { numVal = sliderMax; }
+        if (numVal < sliderMin) { numVal = sliderMin; }
+        var stepNumber = ((ui.value - sliderMin) / stepScale).toFixed(0);
+        var handleText = (ui.value);
+        var leftMargin = (stepNumber / numSteps) * 50 * -1;
+        var perStepPercent = 1 / numSteps; //how far in % each step should be on the slider
+        var leftPos = newSlider.width() * (stepNumber * perStepPercent); //how big of a left margin to give the slider for manual inputs
+        /*         console.log(`
+                numVal: ${numVal},
+                sliderMax: ${sliderMax}
+                sliderMin: ${sliderMin}
+                sliderValRange: ${sliderValRange}
+                stepScale: ${stepScale}
+                Step: ${stepNumber} of ${numSteps}
+                offVal: ${offVal}
+                allVal = ${allVal}
+                initial value: ${handleText}
+                left-margin: ${leftMargin}
+                width: ${newSlider.width()}
+                percent of max: ${percentOfMax}
+                left: ${leftPos}`) */
+        //special handling for response length slider, pulls text aliases for step values from an array
+        if (newSlider.attr('id') == 'amount_gen_zenslider') {
+            handleText = steps[stepNumber];
+            handle.text(handleText);
+            newSlider.val(stepNumber);
+            numVal = steps[stepNumber];
+        }
+        //special handling for TextCompletion rep pen range slider, pulls text aliases for step values from an array
+        else if (newSlider.attr('id') == 'rep_pen_range_textgenerationwebui_zenslider') {
+            handleText = steps[stepNumber];
+            handle.text(handleText);
+            newSlider.val(stepNumber);
+            if (numVal === offVal) { handle.text('Off').css('color', 'rgba(128,128,128,0.5'); }
+            else if (numVal === allVal) { handle.text('All'); }
+            else { handle.css('color', ''); }
+            numVal = steps[stepNumber];
+        }
+        //everything else uses the flat slider value
+        //also note: the above sliders are not custom inputtable due to the array aliasing
+        else {
+            //show 'off' if disabled value is set
+            if (numVal === offVal) { handle.text('Off').css('color', 'rgba(128,128,128,0.5'); }
+            else { handle.text(ui.value.toFixed(decimals)).css('color', ''); }
+            newSlider.val(handleText);
+        }
+        //for manually typed-in values we must adjust left position because JQUI doesn't do it for us
+        handle.css('left', leftPos);
+        //adjust a negative left margin to avoid overflowing right side of slider body
+        handle.css('margin-left', `${leftMargin}px`);
+        originalSlider.val(numVal);
+        originalSlider.trigger('input');
+        originalSlider.trigger('change');
+    }
+}
 function switchUiMode() {
     const fastUi = localStorage.getItem(storage_keys.fast_ui_mode);
-    power_user.fast_ui_mode = fastUi === null ? true : fastUi == "true";
-    $("body").toggleClass("no-blur", power_user.fast_ui_mode);
-    $("#fast_ui_mode").prop("checked", power_user.fast_ui_mode);
+    power_user.fast_ui_mode = fastUi === null ? true : fastUi == 'true';
+    $('body').toggleClass('no-blur', power_user.fast_ui_mode);
+    $('#fast_ui_mode').prop('checked', power_user.fast_ui_mode);
     if (power_user.fast_ui_mode) {
-        $("#blur-strength-block").css('opacity', '0.2')
-        $("#blur_strength").prop('disabled', true)
+        $('#blur-strength-block').css('opacity', '0.2');
+        $('#blur_strength').prop('disabled', true);
     } else {
-        $("#blur-strength-block").css('opacity', '1')
-        $("#blur_strength").prop('disabled', false)
+        $('#blur-strength-block').css('opacity', '1');
+        $('#blur_strength').prop('disabled', false);
     }
 }
 
 function toggleWaifu() {
-    $("#waifuMode").trigger("click");
+    $('#waifuMode').trigger('click');
+    return '';
 }
 
 function switchWaifuMode() {
-    $("body").toggleClass("waifuMode", power_user.waifuMode);
-    $("#waifuMode").prop("checked", power_user.waifuMode);
+    $('body').toggleClass('waifuMode', power_user.waifuMode);
+    $('#waifuMode').prop('checked', power_user.waifuMode);
     scrollChatToBottom();
 }
 
 function switchSpoilerMode() {
     if (power_user.spoiler_free_mode) {
-        $("#description_div").hide();
-        $("#description_textarea").hide();
-        $("#firstmessage_textarea").hide();
-        $("#first_message_div").hide();
-        $("#spoiler_free_desc").show();
+        $('#descriptionWrapper').hide();
+        $('#firstMessageWrapper').hide();
+        $('#spoiler_free_desc').addClass('flex1');
+        $('#creator_notes_spoiler').show();
     }
     else {
-        $("#description_div").show();
-        $("#description_textarea").show();
-        $("#firstmessage_textarea").show();
-        $("#first_message_div").show();
-        $("#spoiler_free_desc").hide();
+        $('#descriptionWrapper').show();
+        $('#firstMessageWrapper').show();
+        $('#spoiler_free_desc').removeClass('flex1');
+        $('#creator_notes_spoiler').hide();
     }
 }
 
 function peekSpoilerMode() {
-    $("#description_div").toggle();
-    $("#description_textarea").toggle();
-    $("#firstmessage_textarea").toggle();
-    $("#first_message_div").toggle();
-
+    $('#descriptionWrapper').toggle();
+    $('#firstMessageWrapper').toggle();
+    $('#creator_notes_spoiler').toggle();
+    $('#spoiler_free_desc').toggleClass('flex1');
 }
 
 
 function switchMovingUI() {
+    $('.drawer-content.maximized').each(function () {
+        $(this).find('.inline-drawer-maximize').trigger('click');
+    });
     const movingUI = localStorage.getItem(storage_keys.movingUI);
-    power_user.movingUI = movingUI === null ? false : movingUI == "true";
-    $("body").toggleClass("movingUI", power_user.movingUI);
+    power_user.movingUI = movingUI === null ? false : movingUI == 'true';
+    $('body').toggleClass('movingUI', power_user.movingUI);
     if (power_user.movingUI === true) {
-        initMovingUI()
+        initMovingUI();
         if (power_user.movingUIState) {
             loadMovingUIState();
         }
-    };
+    }
 }
 
 function noShadows() {
     const noShadows = localStorage.getItem(storage_keys.noShadows);
-    power_user.noShadows = noShadows === null ? false : noShadows == "true";
-    $("body").toggleClass("noShadows", power_user.noShadows);
-    $("#noShadowsmode").prop("checked", power_user.noShadows);
+    power_user.noShadows = noShadows === null ? false : noShadows == 'true';
+    $('body').toggleClass('noShadows', power_user.noShadows);
+    $('#noShadowsmode').prop('checked', power_user.noShadows);
     if (power_user.noShadows) {
-        $("#shadow-width-block").css('opacity', '0.2')
-        $("#shadow_width").prop('disabled', true)
+        $('#shadow-width-block').css('opacity', '0.2');
+        $('#shadow_width').prop('disabled', true);
     } else {
-        $("#shadow-width-block").css('opacity', '1')
-        $("#shadow_width").prop('disabled', false)
+        $('#shadow-width-block').css('opacity', '1');
+        $('#shadow_width').prop('disabled', false);
     }
     scrollChatToBottom();
 }
 
 function applyAvatarStyle() {
     power_user.avatar_style = Number(localStorage.getItem(storage_keys.avatar_style) ?? avatar_styles.ROUND);
-    $("body").toggleClass("big-avatars", power_user.avatar_style === avatar_styles.RECTANGULAR);
-    $("#avatar_style").val(power_user.avatar_style).prop("selected", true);
+    $('body').toggleClass('big-avatars', power_user.avatar_style === avatar_styles.RECTANGULAR);
+    $('body').toggleClass('square-avatars', power_user.avatar_style === avatar_styles.SQUARE);
+    $('#avatar_style').val(power_user.avatar_style).prop('selected', true);
     //$(`input[name="avatar_style"][value="${power_user.avatar_style}"]`).prop("checked", true);
 
 }
@@ -488,30 +1056,30 @@ function applyAvatarStyle() {
 function applyChatDisplay() {
 
     if (!power_user.chat_display === (null || undefined)) {
-        console.debug('applyChatDisplay: saw no chat display type defined')
-        return
+        console.debug('applyChatDisplay: saw no chat display type defined');
+        return;
     }
-    console.debug(`poweruser.chat_display ${power_user.chat_display}`)
-    $("#chat_display").val(power_user.chat_display).prop("selected", true);
+    console.debug(`poweruser.chat_display ${power_user.chat_display}`);
+    $('#chat_display').val(power_user.chat_display).prop('selected', true);
 
     switch (power_user.chat_display) {
         case 0: {
-            console.log('applying default chat')
-            $("body").removeClass("bubblechat");
-            $("body").removeClass("documentstyle");
-            break
+            console.debug('applying default chat');
+            $('body').removeClass('bubblechat');
+            $('body').removeClass('documentstyle');
+            break;
         }
         case 1: {
-            console.log('applying bubblechat')
-            $("body").addClass("bubblechat");
-            $("body").removeClass("documentstyle");
-            break
+            console.debug('applying bubblechat');
+            $('body').addClass('bubblechat');
+            $('body').removeClass('documentstyle');
+            break;
         }
         case 2: {
-            console.log('applying document style')
-            $("body").removeClass("bubblechat");
-            $("body").addClass("documentstyle");
-            break
+            console.debug('applying document style');
+            $('body').removeClass('bubblechat');
+            $('body').addClass('documentstyle');
+            break;
         }
     }
 }
@@ -526,24 +1094,32 @@ function applyChatWidth(type) {
         //document.documentElement.style.setProperty('--sheldWidth', power_user.chat_width);
     } else {
         //this is to prevent the slider from updating page in real time
-        $("#chat_width_slider").off('mouseup touchend').on('mouseup touchend', async () => {
+        $('#chat_width_slider').off('mouseup touchend').on('mouseup touchend', async () => {
             // This is a hack for Firefox to let it render before applying the block width.
             // Otherwise it takes the incorrect slider position with the new value AFTER the resizing.
             await delay(1);
             document.documentElement.style.setProperty('--sheldWidth', `${power_user.chat_width}vw`);
             await delay(1);
-        })
+        });
     }
 
-    $('#chat_width_slider_counter').text(power_user.chat_width);
+    $('#chat_width_slider_counter').val(power_user.chat_width);
 }
 
 async function applyThemeColor(type) {
     if (type === 'main') {
         document.documentElement.style.setProperty('--SmartThemeBodyColor', power_user.main_text_color);
+        const color = power_user.main_text_color.split('(')[1].split(')')[0].split(',');
+        document.documentElement.style.setProperty('--SmartThemeCheckboxBgColorR', color[0]);
+        document.documentElement.style.setProperty('--SmartThemeCheckboxBgColorG', color[1]);
+        document.documentElement.style.setProperty('--SmartThemeCheckboxBgColorB', color[2]);
+        document.documentElement.style.setProperty('--SmartThemeCheckboxBgColorA', color[3]);
     }
     if (type === 'italics') {
         document.documentElement.style.setProperty('--SmartThemeEmColor', power_user.italics_text_color);
+    }
+    if (type === 'underline') {
+        document.documentElement.style.setProperty('--SmartThemeUnderlineColor', power_user.underline_text_color);
     }
     if (type === 'quote') {
         document.documentElement.style.setProperty('--SmartThemeQuoteColor', power_user.quote_text_color);
@@ -572,22 +1148,15 @@ async function applyThemeColor(type) {
 }
 
 async function applyCustomCSS() {
-    power_user.custom_css = String(localStorage.getItem(storage_keys.custom_css) ?? "");
+    power_user.custom_css = String(localStorage.getItem(storage_keys.custom_css) ?? '');
 
-    if (power_user.custom_css.includes("@import")) {
-        var removeImport = /@import[^;]+;/gm
-        power_user.custom_css = power_user.custom_css.replace(removeImport, "");
-        localStorage.setItem(storage_keys.custom_css, power_user.custom_css);
-        toastr.warning('@import not allowed in Custom CSS. @import lines removed.')
-    }
-
-    $("#customCSS").val(power_user.custom_css);
-    var styleId = "custom-style";
+    $('#customCSS').val(power_user.custom_css);
+    var styleId = 'custom-style';
     var style = document.getElementById(styleId);
     if (!style) {
-        style = document.createElement("style");
-        style.setAttribute("type", "text/css");
-        style.setAttribute("id", styleId);
+        style = document.createElement('style');
+        style.setAttribute('type', 'text/css');
+        style.setAttribute('id', styleId);
         document.head.appendChild(style);
     }
     style.innerHTML = power_user.custom_css;
@@ -596,8 +1165,8 @@ async function applyCustomCSS() {
 async function applyBlurStrength() {
     power_user.blur_strength = Number(localStorage.getItem(storage_keys.blur_strength) ?? 1);
     document.documentElement.style.setProperty('--blurStrength', power_user.blur_strength);
-    $("#blur_strength_counter").text(power_user.blur_strength);
-    $("#blur_strength").val(power_user.blur_strength);
+    $('#blur_strength_counter').val(power_user.blur_strength);
+    $('#blur_strength').val(power_user.blur_strength);
 
 
 }
@@ -605,8 +1174,8 @@ async function applyBlurStrength() {
 async function applyShadowWidth() {
     power_user.shadow_width = Number(localStorage.getItem(storage_keys.shadow_width) ?? 2);
     document.documentElement.style.setProperty('--shadowWidth', power_user.shadow_width);
-    $("#shadow_width_counter").text(power_user.shadow_width);
-    $("#shadow_width").val(power_user.shadow_width);
+    $('#shadow_width_counter').val(power_user.shadow_width);
+    $('#shadow_width').val(power_user.shadow_width);
 
 }
 
@@ -618,13 +1187,13 @@ async function applyFontScale(type) {
         document.documentElement.style.setProperty('--fontScale', power_user.font_scale);
     } else {
         //this is to prevent the slider from updating page in real time
-        $("#font_scale").off('mouseup touchend').on('mouseup touchend', () => {
+        $('#font_scale').off('mouseup touchend').on('mouseup touchend', () => {
             document.documentElement.style.setProperty('--fontScale', power_user.font_scale);
-        })
+        });
     }
 
-    $("#font_scale_counter").text(power_user.font_scale);
-    $("#font_scale").val(power_user.font_scale);
+    $('#font_scale_counter').val(power_user.font_scale);
+    $('#font_scale').val(power_user.font_scale);
 }
 
 async function applyTheme(name) {
@@ -637,6 +1206,7 @@ async function applyTheme(name) {
     const themeProperties = [
         { key: 'main_text_color', selector: '#main-text-color-picker', type: 'main' },
         { key: 'italics_text_color', selector: '#italics-color-picker', type: 'italics' },
+        { key: 'underline_text_color', selector: '#underline-color-picker', type: 'underline' },
         { key: 'quote_text_color', selector: '#quote-color-picker', type: 'quote' },
         { key: 'blur_tint_color', selector: '#blur-tint-color-picker', type: 'blurTint' },
         { key: 'chat_tint_color', selector: '#chat-tint-color-picker', type: 'chatTint' },
@@ -649,63 +1219,63 @@ async function applyTheme(name) {
             action: async () => {
                 localStorage.setItem(storage_keys.blur_strength, power_user.blur_strength);
                 await applyBlurStrength();
-            }
+            },
         },
         {
             key: 'custom_css',
             action: async () => {
                 localStorage.setItem(storage_keys.custom_css, power_user.custom_css);
                 await applyCustomCSS();
-            }
+            },
         },
         {
             key: 'shadow_width',
             action: async () => {
                 localStorage.setItem(storage_keys.shadow_width, power_user.shadow_width);
                 await applyShadowWidth();
-            }
+            },
         },
         {
             key: 'font_scale',
             action: async () => {
                 localStorage.setItem(storage_keys.font_scale, power_user.font_scale);
                 await applyFontScale('forced');
-            }
+            },
         },
         {
             key: 'fast_ui_mode',
             action: async () => {
                 localStorage.setItem(storage_keys.fast_ui_mode, power_user.fast_ui_mode);
                 switchUiMode();
-            }
+            },
         },
         {
             key: 'waifuMode',
             action: async () => {
                 localStorage.setItem(storage_keys.waifuMode, power_user.waifuMode);
                 switchWaifuMode();
-            }
+            },
         },
         {
             key: 'chat_display',
             action: async () => {
                 localStorage.setItem(storage_keys.chat_display, power_user.chat_display);
                 applyChatDisplay();
-            }
+            },
         },
         {
             key: 'avatar_style',
             action: async () => {
                 localStorage.setItem(storage_keys.avatar_style, power_user.avatar_style);
                 applyAvatarStyle();
-            }
+            },
         },
         {
             key: 'noShadows',
             action: async () => {
                 localStorage.setItem(storage_keys.noShadows, power_user.noShadows);
                 noShadows();
-            }
+            },
         },
         {
             key: 'chat_width',
@@ -717,57 +1287,108 @@ async function applyTheme(name) {
 
                 localStorage.setItem(storage_keys.chat_width, String(power_user.chat_width));
                 applyChatWidth('forced');
-            }
+            },
         },
         {
             key: 'timer_enabled',
             action: async () => {
                 localStorage.setItem(storage_keys.timer_enabled, Boolean(power_user.timer_enabled));
                 switchTimer();
-            }
+            },
         },
         {
             key: 'timestamps_enabled',
             action: async () => {
                 localStorage.setItem(storage_keys.timestamps_enabled, Boolean(power_user.timestamps_enabled));
                 switchTimestamps();
-            }
+            },
         },
         {
             key: 'timestamp_model_icon',
             action: async () => {
                 localStorage.setItem(storage_keys.timestamp_model_icon, Boolean(power_user.timestamp_model_icon));
                 switchIcons();
-            }
+            },
         },
         {
             key: 'message_token_count_enabled',
             action: async () => {
                 localStorage.setItem(storage_keys.message_token_count_enabled, Boolean(power_user.message_token_count_enabled));
                 switchTokenCount();
-            }
+            },
         },
         {
             key: 'mesIDDisplay_enabled',
             action: async () => {
                 localStorage.setItem(storage_keys.mesIDDisplay_enabled, Boolean(power_user.mesIDDisplay_enabled));
                 switchMesIDDisplay();
-            }
+            },
+        },
+        {
+            key: 'hideChatAvatars_enabled',
+            action: async () => {
+                localStorage.setItem(storage_keys.hideChatAvatars_enabled, Boolean(power_user.hideChatAvatars_enabled));
+                switchHideChatAvatars();
+            },
         },
         {
             key: 'expand_message_actions',
             action: async () => {
                 localStorage.setItem(storage_keys.expand_message_actions, Boolean(power_user.expand_message_actions));
                 switchMessageActions();
-            }
+            },
+        },
+        {
+            key: 'enableZenSliders',
+            action: async () => {
+                localStorage.setItem(storage_keys.enableZenSliders, Boolean(power_user.enableZenSliders));
+                switchMessageActions();
+            },
+        },
+        {
+            key: 'enableLabMode',
+            action: async () => {
+                localStorage.setItem(storage_keys.enableLabMode, Boolean(power_user.enableLabMode));
+                switchMessageActions();
+            },
         },
         {
             key: 'hotswap_enabled',
             action: async () => {
                 localStorage.setItem(storage_keys.hotswap_enabled, Boolean(power_user.hotswap_enabled));
                 switchHotswap();
-            }
-        }
+            },
+        },
+        {
+            key: 'bogus_folders',
+            action: async () => {
+                $('#bogus_folders').prop('checked', power_user.bogus_folders);
+                printCharactersDebounced();
+            },
+        },
+        {
+            key: 'zoomed_avatar_magnification',
+            action: async () => {
+                $('#zoomed_avatar_magnification').prop('checked', power_user.zoomed_avatar_magnification);
+                printCharactersDebounced();
+            },
+        },
+        {
+            key: 'reduced_motion',
+            action: async () => {
+                localStorage.setItem(storage_keys.reduced_motion, String(power_user.reduced_motion));
+                $('#reduced_motion').prop('checked', power_user.reduced_motion);
+                switchReducedMotion();
+            },
+        },
+        {
+            key: 'compact_input_area',
+            action: async () => {
+                localStorage.setItem(storage_keys.compact_input_area, String(power_user.compact_input_area));
+                $('#compact_input_area').prop('checked', power_user.compact_input_area);
+                switchCompactInputArea();
+            },
+        },
     ];
 
     for (const { key, selector, type, action } of themeProperties) {
@@ -777,7 +1398,7 @@ async function applyTheme(name) {
             if (type) await applyThemeColor(type);
             if (action) await action();
         } else {
-            if (selector) { $(selector).attr('color', 'rgba(0,0,0,0)') };
+            if (selector) { $(selector).attr('color', 'rgba(0,0,0,0)'); }
             console.debug(`Empty theme key: ${key}`);
             power_user[key] = '';
         }
@@ -787,7 +1408,7 @@ async function applyTheme(name) {
 }
 
 async function applyMovingUIPreset(name) {
-    resetMovablePanels('quiet')
+    await resetMovablePanels('quiet');
     const movingUIPreset = movingUIPresets.find(x => x.name == name);
 
     if (!movingUIPreset) {
@@ -798,7 +1419,8 @@ async function applyMovingUIPreset(name) {
 
 
     console.log('MovingUI Preset applied: ' + name);
-    loadMovingUIState()
+    loadMovingUIState();
+    saveSettingsDebounced();
 }
 
 /**
@@ -812,9 +1434,9 @@ export function registerDebugFunction(functionId, name, description, func) {
     debug_functions.push({ functionId, name, description, func });
 }
 
-function showDebugMenu() {
-    const template = renderTemplate('debug', { functions: debug_functions });
-    callPopup(template, 'text', '', { wide: true, large: true });
+async function showDebugMenu() {
+    const template = await renderTemplateAsync('debug', { functions: debug_functions });
+    callGenericPopup(template, POPUP_TYPE.TEXT, '', { wide: true, large: true, allowVerticalScrolling: true });
 }
 
 switchUiMode();
@@ -832,13 +1454,53 @@ switchTimer();
 switchTimestamps();
 switchIcons();
 switchMesIDDisplay();
+switchHideChatAvatars();
 switchTokenCount();
 switchMessageActions();
 
+function getExampleMessagesBehavior() {
+    if (power_user.strip_examples) {
+        return 'strip';
+    }
+
+    if (power_user.pin_examples) {
+        return 'keep';
+    }
+
+    return 'normal';
+}
+
 function loadPowerUserSettings(settings, data) {
+    const defaultStscript = JSON.parse(JSON.stringify(power_user.stscript));
     // Load from settings.json
     if (settings.power_user !== undefined) {
         Object.assign(power_user, settings.power_user);
+    }
+
+    if (power_user.stscript === undefined) {
+        power_user.stscript = defaultStscript;
+    } else {
+        if (power_user.stscript.autocomplete === undefined) {
+            power_user.stscript.autocomplete = defaultStscript.autocomplete;
+        } else {
+            if (power_user.stscript.autocomplete.width === undefined) {
+                power_user.stscript.autocomplete.width = defaultStscript.autocomplete.width;
+            }
+            if (power_user.stscript.autocomplete.font === undefined) {
+                power_user.stscript.autocomplete.font = defaultStscript.autocomplete.font;
+            }
+            if (power_user.stscript.autocomplete.style === undefined) {
+                power_user.stscript.autocomplete.style = power_user.stscript.autocomplete_style || defaultStscript.autocomplete.style;
+            }
+        }
+        if (power_user.stscript.parser === undefined) {
+            power_user.stscript.parser = defaultStscript.parser;
+        } else if (power_user.stscript.parser.flags === undefined) {
+            power_user.stscript.parser.flags = defaultStscript.parser.flags;
+        }
+
+        // Cleanup old flags
+        delete power_user.stscript.autocomplete_style;
     }
 
     if (data.themes !== undefined) {
@@ -862,17 +1524,34 @@ function loadPowerUserSettings(settings, data) {
     const timer = localStorage.getItem(storage_keys.timer_enabled);
     const timestamps = localStorage.getItem(storage_keys.timestamps_enabled);
     const mesIDDisplay = localStorage.getItem(storage_keys.mesIDDisplay_enabled);
+    const hideChatAvatars = localStorage.getItem(storage_keys.hideChatAvatars_enabled);
     const expandMessageActions = localStorage.getItem(storage_keys.expand_message_actions);
-    console.log(expandMessageActions)
-    power_user.fast_ui_mode = fastUi === null ? true : fastUi == "true";
-    power_user.movingUI = movingUI === null ? false : movingUI == "true";
-    power_user.noShadows = noShadows === null ? false : noShadows == "true";
-    power_user.hotswap_enabled = hotswap === null ? true : hotswap == "true";
-    power_user.timer_enabled = timer === null ? true : timer == "true";
-    power_user.timestamps_enabled = timestamps === null ? true : timestamps == "true";
-    power_user.mesIDDisplay_enabled = mesIDDisplay === null ? true : mesIDDisplay == "true";
-    power_user.expand_message_actions = expandMessageActions === null ? true : expandMessageActions == "true";
-    console.log(power_user.expand_message_actions)
+    const enableZenSliders = localStorage.getItem(storage_keys.enableZenSliders);
+    const enableLabMode = localStorage.getItem(storage_keys.enableLabMode);
+    const autoLoadChat = localStorage.getItem(storage_keys.auto_load_chat_legacy);
+    const autoConnect = localStorage.getItem(storage_keys.auto_connect_legacy);
+
+    if (autoLoadChat) {
+        power_user.auto_load_chat = autoLoadChat === 'true';
+        localStorage.removeItem(storage_keys.auto_load_chat_legacy);
+    }
+
+    if (autoConnect) {
+        power_user.auto_connect = autoConnect === 'true';
+        localStorage.removeItem(storage_keys.auto_connect_legacy);
+    }
+
+    power_user.fast_ui_mode = fastUi === null ? true : fastUi == 'true';
+    power_user.movingUI = movingUI === null ? false : movingUI == 'true';
+    power_user.noShadows = noShadows === null ? false : noShadows == 'true';
+    power_user.hotswap_enabled = hotswap === null ? true : hotswap == 'true';
+    power_user.timer_enabled = timer === null ? true : timer == 'true';
+    power_user.timestamps_enabled = timestamps === null ? true : timestamps == 'true';
+    power_user.mesIDDisplay_enabled = mesIDDisplay === null ? true : mesIDDisplay == 'true';
+    power_user.hideChatAvatars_enabled = hideChatAvatars === null ? true : hideChatAvatars == 'true';
+    power_user.expand_message_actions = expandMessageActions === null ? true : expandMessageActions == 'true';
+    power_user.enableZenSliders = enableZenSliders === null ? false : enableZenSliders == 'true';
+    power_user.enableLabMode = enableLabMode === null ? false : enableLabMode == 'true';
     power_user.avatar_style = Number(localStorage.getItem(storage_keys.avatar_style) ?? avatar_styles.ROUND);
     //power_user.chat_display = Number(localStorage.getItem(storage_keys.chat_display) ?? chat_styles.DEFAULT);
     power_user.chat_width = Number(localStorage.getItem(storage_keys.chat_width) ?? 50);
@@ -895,93 +1574,140 @@ function loadPowerUserSettings(settings, data) {
         power_user.tokenizer = tokenizers.GPT2;
     }
 
-    $('#relaxed_api_urls').prop("checked", power_user.relaxed_api_urls);
-    $('#trim_spaces').prop("checked", power_user.trim_spaces);
-    $('#continue_on_send').prop("checked", power_user.continue_on_send);
-    $('#quick_continue').prop("checked", power_user.quick_continue);
+    // Clean up old/legacy settings
+    if (power_user.import_card_tags !== undefined) {
+        power_user.tag_import_setting = power_user.import_card_tags ? tag_import_setting.ASK : tag_import_setting.NONE;
+        delete power_user.import_card_tags;
+    }
+
+    $('#single_line').prop('checked', power_user.single_line);
+    $('#relaxed_api_urls').prop('checked', power_user.relaxed_api_urls);
+    $('#world_import_dialog').prop('checked', power_user.world_import_dialog);
+    $('#trim_spaces').prop('checked', power_user.trim_spaces);
+    $('#continue_on_send').prop('checked', power_user.continue_on_send);
+    $('#quick_continue').prop('checked', power_user.quick_continue);
     $('#mes_continue').css('display', power_user.quick_continue ? '' : 'none');
-    $('#auto_swipe').prop("checked", power_user.auto_swipe);
+    $('#gestures-checkbox').prop('checked', power_user.gestures);
+    $('#auto_swipe').prop('checked', power_user.auto_swipe);
     $('#auto_swipe_minimum_length').val(power_user.auto_swipe_minimum_length);
-    $('#auto_swipe_blacklist').val(power_user.auto_swipe_blacklist.join(", "));
+    $('#auto_swipe_blacklist').val(power_user.auto_swipe_blacklist.join(', '));
     $('#auto_swipe_blacklist_threshold').val(power_user.auto_swipe_blacklist_threshold);
     $('#custom_stopping_strings').val(power_user.custom_stopping_strings);
-    $("#custom_stopping_strings_macro").prop("checked", power_user.custom_stopping_strings_macro);
-    $('#fuzzy_search_checkbox').prop("checked", power_user.fuzzy_search);
-    $('#persona_show_notifications').prop("checked", power_user.persona_show_notifications);
-    $('#encode_tags').prop("checked", power_user.encode_tags);
+    $('#custom_stopping_strings_macro').prop('checked', power_user.custom_stopping_strings_macro);
+    $('#fuzzy_search_checkbox').prop('checked', power_user.fuzzy_search);
+    $('#persona_show_notifications').prop('checked', power_user.persona_show_notifications);
+    $('#encode_tags').prop('checked', power_user.encode_tags);
+    $('#example_messages_behavior').val(getExampleMessagesBehavior());
+    $(`#example_messages_behavior option[value="${getExampleMessagesBehavior()}"]`).prop('selected', true);
 
-    $("#console_log_prompts").prop("checked", power_user.console_log_prompts);
-    $('#auto_fix_generated_markdown').prop("checked", power_user.auto_fix_generated_markdown);
-    $('#auto_scroll_chat_to_bottom').prop("checked", power_user.auto_scroll_chat_to_bottom);
+    $('#console_log_prompts').prop('checked', power_user.console_log_prompts);
+    $('#request_token_probabilities').prop('checked', power_user.request_token_probabilities);
+    $('#show_group_chat_queue').prop('checked', power_user.show_group_chat_queue);
+    $('#auto_fix_generated_markdown').prop('checked', power_user.auto_fix_generated_markdown);
+    $('#auto_scroll_chat_to_bottom').prop('checked', power_user.auto_scroll_chat_to_bottom);
+    $('#bogus_folders').prop('checked', power_user.bogus_folders);
+    $('#zoomed_avatar_magnification').prop('checked', power_user.zoomed_avatar_magnification);
     $(`#tokenizer option[value="${power_user.tokenizer}"]`).attr('selected', true);
-    $(`#send_on_enter option[value=${power_user.send_on_enter}]`).attr("selected", true);
-    $("#import_card_tags").prop("checked", power_user.import_card_tags);
-    $("#confirm_message_delete").prop("checked", power_user.confirm_message_delete !== undefined ? !!power_user.confirm_message_delete : true);
-    $("#spoiler_free_mode").prop("checked", power_user.spoiler_free_mode);
-    $("#collapse-newlines-checkbox").prop("checked", power_user.collapse_newlines);
-    $("#pin-examples-checkbox").prop("checked", power_user.pin_examples);
-    $("#remove-examples-checkbox").prop("checked", power_user.strip_examples);
-    $("#always-force-name2-checkbox").prop("checked", power_user.always_force_name2);
-    $("#trim_sentences_checkbox").prop("checked", power_user.trim_sentences);
-    $("#include_newline_checkbox").prop("checked", power_user.include_newline);
-    $('#render_formulas').prop("checked", power_user.render_formulas);
-    $('#disable_group_trimming').prop("checked", power_user.disable_group_trimming);
-    $("#markdown_escape_strings").val(power_user.markdown_escape_strings);
-    $("#fast_ui_mode").prop("checked", power_user.fast_ui_mode);
-    $("#waifuMode").prop("checked", power_user.waifuMode);
-    $("#movingUImode").prop("checked", power_user.movingUI);
-    $("#noShadowsmode").prop("checked", power_user.noShadows);
-    $("#start_reply_with").val(power_user.user_prompt_bias);
-    $("#chat-show-reply-prefix-checkbox").prop("checked", power_user.show_user_prompt_bias);
-    $("#auto_continue_enabled").prop("checked", power_user.auto_continue.enabled);
-    $("#auto_continue_allow_chat_completions").prop("checked", power_user.auto_continue.allow_chat_completions);
-    $("#auto_continue_target_length").val(power_user.auto_continue.target_length);
-    $("#play_message_sound").prop("checked", power_user.play_message_sound);
-    $("#play_sound_unfocused").prop("checked", power_user.play_sound_unfocused);
-    $("#never_resize_avatars").prop("checked", power_user.never_resize_avatars);
-    $("#show_card_avatar_urls").prop("checked", power_user.show_card_avatar_urls);
-    $("#auto_save_msg_edits").prop("checked", power_user.auto_save_msg_edits);
-    $("#allow_name1_display").prop("checked", power_user.allow_name1_display);
-    $("#allow_name2_display").prop("checked", power_user.allow_name2_display);
+    $(`#send_on_enter option[value=${power_user.send_on_enter}]`).attr('selected', true);
+    $('#confirm_message_delete').prop('checked', power_user.confirm_message_delete !== undefined ? !!power_user.confirm_message_delete : true);
+    $('#spoiler_free_mode').prop('checked', power_user.spoiler_free_mode);
+    $('#collapse-newlines-checkbox').prop('checked', power_user.collapse_newlines);
+    $('#always-force-name2-checkbox').prop('checked', power_user.always_force_name2);
+    $('#trim_sentences_checkbox').prop('checked', power_user.trim_sentences);
+    $('#include_newline_checkbox').prop('checked', power_user.include_newline);
+    $('#render_formulas').prop('checked', power_user.render_formulas);
+    $('#disable_group_trimming').prop('checked', power_user.disable_group_trimming);
+    $('#markdown_escape_strings').val(power_user.markdown_escape_strings);
+    $('#fast_ui_mode').prop('checked', power_user.fast_ui_mode);
+    $('#waifuMode').prop('checked', power_user.waifuMode);
+    $('#movingUImode').prop('checked', power_user.movingUI);
+    $('#noShadowsmode').prop('checked', power_user.noShadows);
+    $('#start_reply_with').val(power_user.user_prompt_bias);
+    $('#chat-show-reply-prefix-checkbox').prop('checked', power_user.show_user_prompt_bias);
+    $('#auto_continue_enabled').prop('checked', power_user.auto_continue.enabled);
+    $('#auto_continue_allow_chat_completions').prop('checked', power_user.auto_continue.allow_chat_completions);
+    $('#auto_continue_target_length').val(power_user.auto_continue.target_length);
+    $('#play_message_sound').prop('checked', power_user.play_message_sound);
+    $('#play_sound_unfocused').prop('checked', power_user.play_sound_unfocused);
+    $('#never_resize_avatars').prop('checked', power_user.never_resize_avatars);
+    $('#show_card_avatar_urls').prop('checked', power_user.show_card_avatar_urls);
+    $('#auto_save_msg_edits').prop('checked', power_user.auto_save_msg_edits);
+    $('#allow_name1_display').prop('checked', power_user.allow_name1_display);
+    $('#allow_name2_display').prop('checked', power_user.allow_name2_display);
     //$("#removeXML").prop("checked", power_user.removeXML);
-    $("#hotswapEnabled").prop("checked", power_user.hotswap_enabled);
-    $("#messageTimerEnabled").prop("checked", power_user.timer_enabled);
-    $("#messageTimestampsEnabled").prop("checked", power_user.timestamps_enabled);
-    $("#messageModelIconEnabled").prop("checked", power_user.timestamp_model_icon);
-    $("#mesIDDisplayEnabled").prop("checked", power_user.mesIDDisplay_enabled);
-    $("#prefer_character_prompt").prop("checked", power_user.prefer_character_prompt);
-    $("#prefer_character_jailbreak").prop("checked", power_user.prefer_character_jailbreak);
-    $(`input[name="avatar_style"][value="${power_user.avatar_style}"]`).prop("checked", true);
-    $(`#chat_display option[value=${power_user.chat_display}]`).attr("selected", true).trigger('change');
+    $('#hotswapEnabled').prop('checked', power_user.hotswap_enabled);
+    $('#messageTimerEnabled').prop('checked', power_user.timer_enabled);
+    $('#messageTimestampsEnabled').prop('checked', power_user.timestamps_enabled);
+    $('#messageModelIconEnabled').prop('checked', power_user.timestamp_model_icon);
+    $('#mesIDDisplayEnabled').prop('checked', power_user.mesIDDisplay_enabled);
+    $('#hideChatAvatarsEndabled').prop('checked', power_user.hideChatAvatars_enabled);
+    $('#prefer_character_prompt').prop('checked', power_user.prefer_character_prompt);
+    $('#prefer_character_jailbreak').prop('checked', power_user.prefer_character_jailbreak);
+    $('#enableZenSliders').prop('checked', power_user.enableZenSliders).trigger('input');
+    $('#enableLabMode').prop('checked', power_user.enableLabMode).trigger('input');
+    $(`input[name="avatar_style"][value="${power_user.avatar_style}"]`).prop('checked', true);
+    $(`#chat_display option[value=${power_user.chat_display}]`).attr('selected', true).trigger('change');
     $('#chat_width_slider').val(power_user.chat_width);
-    $("#token_padding").val(power_user.token_padding);
+    $('#token_padding').val(power_user.token_padding);
+    $('#aux_field').val(power_user.aux_field);
+    $('#tag_import_setting').val(power_user.tag_import_setting);
 
-    $("#font_scale").val(power_user.font_scale);
-    $("#font_scale_counter").text(power_user.font_scale);
+    $('#stscript_autocomplete_autoHide').prop('checked', power_user.stscript.autocomplete.autoHide ?? false).trigger('input');
+    $('#stscript_matching').val(power_user.stscript.matching ?? 'fuzzy');
+    $('#stscript_autocomplete_style').val(power_user.stscript.autocomplete.style ?? 'theme');
+    document.body.setAttribute('data-stscript-style', power_user.stscript.autocomplete.style);
+    $('#stscript_parser_flag_strict_escaping').prop('checked', power_user.stscript.parser.flags[PARSER_FLAG.STRICT_ESCAPING] ?? false);
+    $('#stscript_parser_flag_replace_getvar').prop('checked', power_user.stscript.parser.flags[PARSER_FLAG.REPLACE_GETVAR] ?? false);
+    $('#stscript_autocomplete_font_scale').val(power_user.stscript.autocomplete.font.scale ?? defaultStscript.autocomplete.font.scale);
+    $('#stscript_autocomplete_font_scale_counter').val(power_user.stscript.autocomplete.font.scale ?? defaultStscript.autocomplete.font.scale);
+    document.body.style.setProperty('--ac-font-scale', power_user.stscript.autocomplete.font.scale ?? defaultStscript.autocomplete.font.scale.toString());
+    $('#stscript_autocomplete_width_left').val(power_user.stscript.autocomplete.width.left ?? AUTOCOMPLETE_WIDTH.CHAT);
+    document.querySelector('#stscript_autocomplete_width_left').dispatchEvent(new Event('input', { bubbles: true }));
+    $('#stscript_autocomplete_width_right').val(power_user.stscript.autocomplete.width.right ?? AUTOCOMPLETE_WIDTH.CHAT);
+    document.querySelector('#stscript_autocomplete_width_right').dispatchEvent(new Event('input', { bubbles: true }));
 
-    $("#blur_strength").val(power_user.blur_strength);
-    $("#blur_strength_counter").text(power_user.blur_strength);
+    $('#restore_user_input').prop('checked', power_user.restore_user_input);
 
-    $("#shadow_width").val(power_user.shadow_width);
-    $("#shadow_width_counter").text(power_user.shadow_width);
+    $('#chat_truncation').val(power_user.chat_truncation);
+    $('#chat_truncation_counter').val(power_user.chat_truncation);
 
-    $("#main-text-color-picker").attr('color', power_user.main_text_color);
-    $("#italics-color-picker").attr('color', power_user.italics_text_color);
-    $("#quote-color-picker").attr('color', power_user.quote_text_color);
-    $("#blur-tint-color-picker").attr('color', power_user.blur_tint_color);
-    $("#chat-tint-color-picker").attr('color', power_user.chat_tint_color);
-    $("#user-mes-blur-tint-color-picker").attr('color', power_user.user_mes_blur_tint_color);
-    $("#bot-mes-blur-tint-color-picker").attr('color', power_user.bot_mes_blur_tint_color);
-    $("#shadow-color-picker").attr('color', power_user.shadow_color);
-    $("#border-color-picker").attr('color', power_user.border_color);
-    $("#ui_mode_select").val(power_user.ui_mode).find(`option[value="${power_user.ui_mode}"]`).attr('selected', true);
+    $('#streaming_fps').val(power_user.streaming_fps);
+    $('#streaming_fps_counter').val(power_user.streaming_fps);
+
+    $('#smooth_streaming').prop('checked', power_user.smooth_streaming);
+    $('#smooth_streaming_speed').val(power_user.smooth_streaming_speed);
+
+    $('#font_scale').val(power_user.font_scale);
+    $('#font_scale_counter').val(power_user.font_scale);
+
+    $('#blur_strength').val(power_user.blur_strength);
+    $('#blur_strength_counter').val(power_user.blur_strength);
+
+    $('#shadow_width').val(power_user.shadow_width);
+    $('#shadow_width_counter').val(power_user.shadow_width);
+
+    $('#main-text-color-picker').attr('color', power_user.main_text_color);
+    $('#italics-color-picker').attr('color', power_user.italics_text_color);
+    $('#underline-color-picker').attr('color', power_user.underline_text_color);
+    $('#quote-color-picker').attr('color', power_user.quote_text_color);
+    $('#blur-tint-color-picker').attr('color', power_user.blur_tint_color);
+    $('#chat-tint-color-picker').attr('color', power_user.chat_tint_color);
+    $('#user-mes-blur-tint-color-picker').attr('color', power_user.user_mes_blur_tint_color);
+    $('#bot-mes-blur-tint-color-picker').attr('color', power_user.bot_mes_blur_tint_color);
+    $('#shadow-color-picker').attr('color', power_user.shadow_color);
+    $('#border-color-picker').attr('color', power_user.border_color);
+    $('#ui_mode_select').val(power_user.ui_mode).find(`option[value="${power_user.ui_mode}"]`).attr('selected', true);
+    $('#reduced_motion').prop('checked', power_user.reduced_motion);
+    $('#auto-connect-checkbox').prop('checked', power_user.auto_connect);
+    $('#auto-load-chat-checkbox').prop('checked', power_user.auto_load_chat);
+    $('#forbid_external_media').prop('checked', power_user.forbid_external_media);
 
     for (const theme of themes) {
         const option = document.createElement('option');
         option.value = theme.name;
         option.innerText = theme.name;
         option.selected = theme.name == power_user.theme;
-        $("#themes").append(option);
+        $('#themes').append(option);
     }
 
     for (const movingUIPreset of movingUIPresets) {
@@ -989,11 +1715,13 @@ function loadPowerUserSettings(settings, data) {
         option.value = movingUIPreset.name;
         option.innerText = movingUIPreset.name;
         option.selected = movingUIPreset.name == power_user.movingUIPreset;
-        $("#movingUIPresets").append(option);
+        $('#movingUIPresets').append(option);
     }
 
 
-    $(`#character_sort_order option[data-order="${power_user.sort_order}"][data-field="${power_user.sort_field}"]`).prop("selected", true);
+    $(`#character_sort_order option[data-order="${power_user.sort_order}"][data-field="${power_user.sort_field}"]`).prop('selected', true);
+    switchReducedMotion();
+    switchCompactInputArea();
     reloadMarkdownProcessor(power_user.render_formulas);
     loadInstructMode(data);
     loadContextSettings();
@@ -1007,40 +1735,40 @@ function loadPowerUserSettings(settings, data) {
 
 async function loadCharListState() {
     if (document.querySelector('.character_select') !== null) {
-        console.debug('setting charlist state to...')
+        console.debug('setting charlist state to...');
         if (power_user.charListGrid === true) {
-            console.debug('..to grid')
-            $("#charListGridToggle").trigger('click')
-        } else { console.debug('..to list') }
+            console.debug('..to grid');
+            $('#charListGridToggle').trigger('click');
+        } else { console.debug('..to list'); }
     } else {
-        console.debug('charlist not ready yet')
-        await delay(100)
+        console.debug('charlist not ready yet');
+        await delay(100);
         loadCharListState();
     }
 }
 
 function loadMovingUIState() {
-    if (isMobile() === false
+    if (!isMobile()
         && power_user.movingUIState
         && power_user.movingUI === true) {
-        console.debug('loading movingUI state')
+        console.debug('loading movingUI state');
         for (var elmntName of Object.keys(power_user.movingUIState)) {
             var elmntState = power_user.movingUIState[elmntName];
             try {
                 var elmnt = $('#' + $.escapeSelector(elmntName));
                 if (elmnt.length) {
-                    console.debug(`loading state for ${elmntName}`)
+                    console.debug(`loading state for ${elmntName}`);
                     elmnt.css(elmntState);
                 } else {
-                    console.debug(`skipping ${elmntName} because it doesn't exist in the DOM`)
+                    console.debug(`skipping ${elmntName} because it doesn't exist in the DOM`);
                 }
             } catch (err) {
-                console.debug(`error occurred while processing ${elmntName}: ${err}`)
+                console.debug(`error occurred while processing ${elmntName}: ${err}`);
             }
         }
     } else {
-        console.debug('skipping movingUI state load')
-        return
+        console.debug('skipping movingUI state load');
+        return;
     }
 }
 
@@ -1055,28 +1783,90 @@ function loadMaxContextUnlocked() {
 }
 
 function switchMaxContextSize() {
-    const elements = [$('#max_context'), $('#rep_pen_range'), $('#rep_pen_range_textgenerationwebui')];
+    const elements = [
+        $('#max_context'),
+        $('#max_context_counter'),
+        $('#rep_pen_range'),
+        $('#rep_pen_range_counter'),
+        $('#rep_pen_range_textgenerationwebui'),
+        $('#rep_pen_range_counter_textgenerationwebui'),
+        $('#dry_penalty_last_n_textgenerationwebui'),
+        $('#dry_penalty_last_n_counter_textgenerationwebui'),
+        $('#rep_pen_decay_textgenerationwebui'),
+        $('#rep_pen_decay_counter_textgenerationwebui'),
+    ];
     const maxValue = power_user.max_context_unlocked ? MAX_CONTEXT_UNLOCKED : MAX_CONTEXT_DEFAULT;
-
+    const minValue = power_user.max_context_unlocked ? maxContextMin : maxContextMin;
+    const steps = power_user.max_context_unlocked ? unlockedMaxContextStep : maxContextStep;
+    $('#rep_pen_range_textgenerationwebui_zenslider').remove(); //unsure why, but this is necessary.
+    $('#dry_penalty_last_n_textgenerationwebui_zenslider').remove();
+    $('#rep_pen_decay_textgenerationwebui_zenslider').remove();
     for (const element of elements) {
+        const id = element.attr('id');
         element.attr('max', maxValue);
+
+        if (typeof id === 'string' && id?.indexOf('max_context') !== -1) {
+            element.attr('min', minValue);
+            element.attr('step', steps); //only change setps for max context, because rep pen range needs step of 1 due to important values of -1 and 0
+        }
         const value = Number(element.val());
 
         if (value >= maxValue) {
             element.val(maxValue).trigger('input');
         }
     }
+
+    const maxAmountGen = power_user.max_context_unlocked ? MAX_RESPONSE_UNLOCKED : MAX_RESPONSE_DEFAULT;
+    $('#amount_gen').attr('max', maxAmountGen);
+    $('#amount_gen_counter').attr('max', maxAmountGen);
+
+    if (Number($('#amount_gen').val()) >= maxAmountGen) {
+        $('#amount_gen').val(maxAmountGen).trigger('input');
+    }
+
+    if (power_user.enableZenSliders) {
+        $('#max_context_zenslider').remove();
+        CreateZenSliders($('#max_context'));
+        $('#rep_pen_range_textgenerationwebui_zenslider').remove();
+        CreateZenSliders($('#rep_pen_range_textgenerationwebui'));
+        $('#dry_penalty_last_n_textgenerationwebui_zenslider').remove();
+        CreateZenSliders($('#dry_penalty_last_n_textgenerationwebui'));
+        $('#rep_pen_decay_textgenerationwebui_zenslider').remove();
+        CreateZenSliders($('#rep_pen_decay_textgenerationwebui'));
+    }
 }
 
-function loadContextSettings() {
-    const controls = [
-        { id: "context_story_string", property: "story_string", isCheckbox: false },
-        { id: "context_example_separator", property: "example_separator", isCheckbox: false },
-        { id: "context_chat_start", property: "chat_start", isCheckbox: false },
-    ];
+// Fetch a compiled object of all preset settings
+function getContextSettings() {
+    let compiledSettings = {};
 
-    controls.forEach(control => {
+    contextControls.forEach((control) => {
+        let value = control.isGlobalSetting ? power_user[control.property] : power_user.context[control.property];
+
+        // Force to a boolean if the setting is a checkbox
+        if (control.isCheckbox) {
+            value = !!value;
+        }
+
+        compiledSettings[control.property] = value;
+    });
+
+    return compiledSettings;
+}
+
+// TODO: Maybe add a refresh button to reset settings to preset
+// TODO: Add "global state" if a preset doesn't set the power_user checkboxes
+function loadContextSettings() {
+    contextControls.forEach(control => {
         const $element = $(`#${control.id}`);
+
+        if (control.isGlobalSetting) {
+            return;
+        }
+
+        if (control.defaultValue !== undefined && power_user.context[control.property] === undefined) {
+            power_user.context[control.property] = control.defaultValue;
+        }
 
         if (control.isCheckbox) {
             $element.prop('checked', power_user.context[control.property]);
@@ -1084,8 +1874,16 @@ function loadContextSettings() {
             $element.val(power_user.context[control.property]);
         }
 
+        // If the setting already exists, no need to duplicate it
+        // TODO: Maybe check the power_user object for the setting instead of a flag?
         $element.on('input', function () {
-            power_user.context[control.property] = control.isCheckbox ? !!$(this).prop('checked') : $(this).val();
+            const value = control.isCheckbox ? !!$(this).prop('checked') : $(this).val();
+            if (control.isGlobalSetting) {
+                power_user[control.property] = value;
+            } else {
+                power_user.context[control.property] = value;
+            }
+
             saveSettingsDebounced();
             if (!control.isCheckbox) {
                 resetScrollHeight($element);
@@ -1111,30 +1909,42 @@ function loadContextSettings() {
         }
 
         power_user.context.preset = name;
-        controls.forEach(control => {
-            if (preset[control.property] !== undefined) {
-                power_user.context[control.property] = preset[control.property];
+        contextControls.forEach(control => {
+            const presetValue = preset[control.property] ?? control.defaultValue;
+
+            if (presetValue !== undefined) {
+                if (control.isGlobalSetting) {
+                    power_user[control.property] = presetValue;
+                } else {
+                    power_user.context[control.property] = presetValue;
+                }
+
                 const $element = $(`#${control.id}`);
 
                 if (control.isCheckbox) {
-                    $element.prop('checked', power_user.context[control.property]).trigger('input');
+                    $element
+                        .prop('checked', control.isGlobalSetting ? power_user[control.property] : power_user.context[control.property])
+                        .trigger('input');
                 } else {
-                    $element.val(power_user.context[control.property]).trigger('input');
+                    $element
+                        .val(control.isGlobalSetting ? power_user[control.property] : power_user.context[control.property])
+                        .trigger('input');
                 }
             }
         });
 
-        // Select matching instruct preset
-        for (const instruct_preset of instruct_presets) {
-            // If instruct preset matches the context template
-            if (instruct_preset.name === name) {
-                selectInstructPreset(instruct_preset.name);
-                break;
+        if (power_user.instruct.bind_to_context) {
+            // Select matching instruct preset
+            for (const instruct_preset of instruct_presets) {
+                // If instruct preset matches the context template
+                if (instruct_preset.name === name) {
+                    selectInstructPreset(instruct_preset.name);
+                    break;
+                }
             }
         }
 
         highlightDefaultContext();
-
         saveSettingsDebounced();
     });
 
@@ -1159,10 +1969,17 @@ function highlightDefaultContext() {
     $('#context_delete_preset').toggleClass('disabled', power_user.default_context === power_user.context.preset);
 }
 
+/**
+ * Fuzzy search characters by a search term
+ * @param {string} searchValue - The search term
+ * @returns {FuseResult[]} Results as items with their score
+ */
 export function fuzzySearchCharacters(searchValue) {
+    // @ts-ignore
     const fuse = new Fuse(characters, {
         keys: [
-            { name: 'data.name', weight: 5 },
+            { name: 'data.name', weight: 20 },
+            { name: '#tags', weight: 10, getFn: (character) => getTagsList(character.avatar).map(x => x.name).join('||') },
             { name: 'data.description', weight: 3 },
             { name: 'data.mes_example', weight: 3 },
             { name: 'data.scenario', weight: 2 },
@@ -1171,53 +1988,118 @@ export function fuzzySearchCharacters(searchValue) {
             { name: 'data.creator_notes', weight: 2 },
             { name: 'data.creator', weight: 1 },
             { name: 'data.tags', weight: 1 },
-            { name: 'data.alternate_greetings', weight: 1 }
+            { name: 'data.alternate_greetings', weight: 1 },
         ],
         includeScore: true,
         ignoreLocation: true,
+        useExtendedSearch: true,
         threshold: 0.2,
     });
 
     const results = fuse.search(searchValue);
     console.debug('Characters fuzzy search results for ' + searchValue, results);
-    const indices = results.map(x => x.refIndex);
-    return indices;
+    return results;
 }
 
+/**
+ * Fuzzy search world info entries by a search term
+ * @param {*[]} data - WI items data array
+ * @param {string} searchValue - The search term
+ * @returns {FuseResult[]} Results as items with their score
+ */
 export function fuzzySearchWorldInfo(data, searchValue) {
+    // @ts-ignore
     const fuse = new Fuse(data, {
         keys: [
-            { name: 'key', weight: 3 },
+            { name: 'key', weight: 20 },
+            { name: 'group', weight: 15 },
+            { name: 'comment', weight: 10 },
+            { name: 'keysecondary', weight: 10 },
             { name: 'content', weight: 3 },
-            { name: 'comment', weight: 2 },
-            { name: 'keysecondary', weight: 2 },
             { name: 'uid', weight: 1 },
+            { name: 'automationId', weight: 1 },
         ],
         includeScore: true,
         ignoreLocation: true,
+        useExtendedSearch: true,
         threshold: 0.2,
     });
 
     const results = fuse.search(searchValue);
     console.debug('World Info fuzzy search results for ' + searchValue, results);
-    return results.map(x => x.item?.uid);
+    return results;
 }
 
-export function fuzzySearchGroups(searchValue) {
-    const fuse = new Fuse(groups, {
+/**
+ * Fuzzy search persona entries by a search term
+ * @param {*[]} data - persona data array
+ * @param {string} searchValue - The search term
+ * @returns {FuseResult[]} Results as items with their score
+ */
+export function fuzzySearchPersonas(data, searchValue) {
+    data = data.map(x => ({ key: x, name: power_user.personas[x] ?? '', description: power_user.persona_descriptions[x]?.description ?? '' }));
+    // @ts-ignore
+    const fuse = new Fuse(data, {
         keys: [
-            { name: 'name', weight: 3 },
-            { name: 'members', weight: 1 },
+            { name: 'name', weight: 20 },
+            { name: 'description', weight: 3 },
         ],
         includeScore: true,
         ignoreLocation: true,
+        useExtendedSearch: true,
+        threshold: 0.2,
+    });
+
+    const results = fuse.search(searchValue);
+    console.debug('Personas fuzzy search results for ' + searchValue, results);
+    return results;
+}
+
+/**
+ * Fuzzy search tags by a search term
+ * @param {string} searchValue - The search term
+ * @returns {FuseResult[]} Results as items with their score
+ */
+export function fuzzySearchTags(searchValue) {
+    // @ts-ignore
+    const fuse = new Fuse(tags, {
+        keys: [
+            { name: 'name', weight: 1 },
+        ],
+        includeScore: true,
+        ignoreLocation: true,
+        useExtendedSearch: true,
+        threshold: 0.2,
+    });
+
+    const results = fuse.search(searchValue);
+    console.debug('Tags fuzzy search results for ' + searchValue, results);
+    return results;
+}
+
+/**
+ * Fuzzy search groups by a search term
+ * @param {string} searchValue - The search term
+ * @returns {FuseResult[]} Results as items with their score
+ */
+export function fuzzySearchGroups(searchValue) {
+    // @ts-ignore
+    const fuse = new Fuse(groups, {
+        keys: [
+            { name: 'name', weight: 20 },
+            { name: 'members', weight: 15 },
+            { name: '#tags', weight: 10, getFn: (group) => getTagsList(group.id).map(x => x.name).join('||') },
+            { name: 'id', weight: 1 },
+        ],
+        includeScore: true,
+        ignoreLocation: true,
+        useExtendedSearch: true,
         threshold: 0.2,
     });
 
     const results = fuse.search(searchValue);
     console.debug('Groups fuzzy search results for ' + searchValue, results);
-    const ids = results.map(x => String(x.item?.id)).filter(x => x);
-    return ids;
+    return results;
 }
 
 /**
@@ -1227,6 +2109,9 @@ export function fuzzySearchGroups(searchValue) {
  */
 export function renderStoryString(params) {
     try {
+        // Validate and log possible warnings/errors
+        validateStoryString(power_user.context.story_string, params);
+
         // compile the story string template into a function, with no HTML escaping
         const compiledTemplate = Handlebars.compile(power_user.context.story_string, { noEscape: true });
 
@@ -1236,12 +2121,14 @@ export function renderStoryString(params) {
         // substitute {{macro}} params that are not defined in the story string
         output = substituteParams(output, params.user, params.char);
 
-        // remove leading whitespace
-        output = output.trimStart();
+        // remove leading newlines
+        output = output.replace(/^\n+/, '');
 
         // add a newline to the end of the story string if it doesn't have one
-        if (!output.endsWith('\n')) {
-            output += '\n';
+        if (output.length > 0 && !output.endsWith('\n')) {
+            if (!power_user.instruct.enabled || power_user.instruct.wrap) {
+                output += '\n';
+            }
         }
 
         return output;
@@ -1252,12 +2139,57 @@ export function renderStoryString(params) {
     }
 }
 
-const sortFunc = (a, b) => power_user.sort_order == 'asc' ? compareFunc(a, b) : compareFunc(b, a);
-const compareFunc = (first, second) => {
-    if (power_user.sort_order == 'random') {
-        return Math.random() > 0.5 ? 1 : -1;
+/**
+ * Validate the story string for possible warnings or issues
+ *
+ * @param {string} storyString - The story string
+ * @param {Object} params - The story string parameters
+ */
+function validateStoryString(storyString, params) {
+    /** @type {{hashCache: {[hash: string]: {fieldsWarned: {[key: string]: boolean}}}}} */
+    const cache = JSON.parse(localStorage.getItem(storage_keys.storyStringValidationCache)) ?? { hashCache: {} };
+
+    const hash = getStringHash(storyString);
+
+    // Initialize the cache for the current hash if it doesn't exist
+    if (!cache.hashCache[hash]) {
+        cache.hashCache[hash] = { fieldsWarned: {} };
     }
 
+    const currentCache = cache.hashCache[hash];
+    const fieldsToWarn = [];
+
+    function validateMissingField(field, fallbackLegacyField = null) {
+        const contains = storyString.includes(`{{${field}}}`) || (!!fallbackLegacyField && storyString.includes(`{{${fallbackLegacyField}}}`));
+        if (!contains && params[field]) {
+            const wasLogged = currentCache.fieldsWarned[field];
+            if (!wasLogged) {
+                fieldsToWarn.push(field);
+                currentCache.fieldsWarned[field] = true;
+            }
+            console.warn(`The story string does not contain {{${field}}}, but it would contain content:\n`, params[field]);
+        }
+    }
+
+    validateMissingField('description');
+    validateMissingField('personality');
+    validateMissingField('persona');
+    validateMissingField('scenario');
+    // validateMissingField('system');
+    validateMissingField('wiBefore', 'loreBefore');
+    validateMissingField('wiAfter', 'loreAfter');
+
+    if (fieldsToWarn.length > 0) {
+        const fieldsList = fieldsToWarn.map(field => `{{${field}}}`).join(', ');
+        toastr.warning(`The story string does not contain the following fields, but they would contain content: ${fieldsList}`, 'Story String Validation');
+    }
+
+    localStorage.setItem(storage_keys.storyStringValidationCache, JSON.stringify(cache));
+}
+
+
+const sortFunc = (a, b) => power_user.sort_order == 'asc' ? compareFunc(a, b) : compareFunc(b, a);
+const compareFunc = (first, second) => {
     const a = first[power_user.sort_field];
     const b = second[power_user.sort_field];
 
@@ -1274,7 +2206,7 @@ const compareFunc = (first, second) => {
             if (a === b) return 0;         // Sort equal values normally
             return a < b ? -1 : 1;         // Sort non-boolean values normally
         default:
-            return typeof a == "string"
+            return typeof a == 'string'
                 ? a.localeCompare(b)
                 : a - b;
     }
@@ -1289,21 +2221,196 @@ function sortEntitiesList(entities) {
         return;
     }
 
-    entities.sort((a, b) => sortFunc(a.item, b.item));
-}
-
-async function saveTheme() {
-    const name = await callPopup('Enter a theme preset name:', 'input');
-
-    if (!name) {
+    if (power_user.sort_order === 'random') {
+        shuffle(entities);
         return;
     }
 
-    const theme = {
+    const isSearch = $('#character_sort_order option[data-field="search"]').is(':selected');
+
+    entities.sort((a, b) => {
+        // Sort tags/folders will always be at the top
+        if (a.type === 'tag' && b.type !== 'tag') {
+            return -1;
+        }
+        if (a.type !== 'tag' && b.type === 'tag') {
+            return 1;
+        }
+
+        // If we have search sorting, we take scores and use those
+        if (isSearch) {
+            const aScore = entitiesFilter.getScore(FILTER_TYPES.SEARCH, `${a.type}.${a.id}`);
+            const bScore = entitiesFilter.getScore(FILTER_TYPES.SEARCH, `${b.type}.${b.id}`);
+            return (aScore - bScore);
+        }
+
+        return sortFunc(a.item, b.item);
+    });
+}
+
+/**
+ * Updates the current UI theme file.
+ */
+async function updateTheme() {
+    await saveTheme(power_user.theme);
+    toastr.success('Theme saved.');
+}
+
+async function deleteTheme() {
+    const themeName = power_user.theme;
+
+    if (!themeName) {
+        toastr.info('No theme selected.');
+        return;
+    }
+
+    const template = $(await renderTemplateAsync('themeDelete', { themeName }));
+    const confirm = await callGenericPopup(template, POPUP_TYPE.CONFIRM);
+
+    if (!confirm) {
+        return;
+    }
+
+    const response = await fetch('/api/themes/delete', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ name: themeName }),
+    });
+
+    if (!response.ok) {
+        toastr.error('Failed to delete theme. Check the console for more information.');
+        return;
+    }
+
+    const themeIndex = themes.findIndex(x => x.name == themeName);
+
+    if (themeIndex !== -1) {
+        themes.splice(themeIndex, 1);
+        $(`#themes option[value="${themeName}"]`).remove();
+        power_user.theme = themes[0]?.name;
+        saveSettingsDebounced();
+        if (power_user.theme) {
+            await applyTheme(power_user.theme);
+        }
+        toastr.success('Theme deleted.');
+    }
+}
+
+/**
+ * Exports the current theme to a file.
+ */
+async function exportTheme() {
+    const themeFile = await saveTheme(power_user.theme);
+    const fileName = `${themeFile.name}.json`;
+    download(JSON.stringify(themeFile, null, 4), fileName, 'application/json');
+}
+
+/**
+ * Imports a theme from a file.
+ * @param {File} file File to import.
+ * @returns {Promise<void>} A promise that resolves when the theme is imported.
+ */
+async function importTheme(file) {
+    if (!file) {
+        return;
+    }
+
+    const fileText = await getFileText(file);
+    const parsed = JSON.parse(fileText);
+
+    if (!parsed.name) {
+        throw new Error('Missing name');
+    }
+
+    if (themes.some(t => t.name === parsed.name)) {
+        throw new Error('Theme with that name already exists');
+    }
+
+    if (typeof parsed.custom_css === 'string' && parsed.custom_css.includes('@import')) {
+        const template = $(await renderTemplateAsync('themeImportWarning'));
+        const confirm = await callGenericPopup(template, POPUP_TYPE.CONFIRM);
+        if (!confirm) {
+            throw new Error('Theme contains @import lines');
+        }
+    }
+
+    themes.push(parsed);
+    await saveTheme(parsed.name, getNewTheme(parsed));
+    const option = document.createElement('option');
+    option.selected = false;
+    option.value = parsed.name;
+    option.innerText = parsed.name;
+    $('#themes').append(option);
+    saveSettingsDebounced();
+    toastr.success(parsed.name, 'Theme imported');
+}
+
+/**
+ * Saves the current theme to the server.
+ * @param {string|undefined} name Theme name. If undefined, a popup will be shown to enter a name.
+ * @param {object|undefined} theme Theme object. If undefined, the current theme will be saved.
+ * @returns {Promise<object>} A promise that resolves when the theme is saved.
+ */
+async function saveTheme(name = undefined, theme = undefined) {
+    if (typeof name !== 'string') {
+        const newName = await callGenericPopup('Enter a theme preset name:', POPUP_TYPE.INPUT, power_user.theme);
+
+        if (!newName) {
+            return;
+        }
+
+        name = String(newName);
+    }
+
+    if (typeof theme !== 'object') {
+        theme = getThemeObject(name);
+    }
+
+    const response = await fetch('/api/themes/save', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify(theme),
+    });
+
+    if (!response.ok) {
+        toastr.error('Check the server connection and reload the page to prevent data loss.', 'Theme could not be saved');
+        console.error('Theme could not be saved', response);
+        throw new Error('Theme could not be saved');
+    }
+
+    const themeIndex = themes.findIndex(x => x.name == name);
+
+    if (themeIndex == -1) {
+        themes.push(theme);
+        const option = document.createElement('option');
+        option.selected = true;
+        option.value = name;
+        option.innerText = name;
+        $('#themes').append(option);
+    }
+    else {
+        themes[themeIndex] = theme;
+        $(`#themes option[value="${name}"]`).attr('selected', true);
+    }
+
+    power_user.theme = name;
+    saveSettingsDebounced();
+
+    return theme;
+}
+
+/**
+ * Gets a snapshot of the current theme settings.
+ * @param {string} name Name of the theme
+ * @returns {object} Theme object
+ */
+function getThemeObject(name) {
+    return {
         name,
         blur_strength: power_user.blur_strength,
         main_text_color: power_user.main_text_color,
         italics_text_color: power_user.italics_text_color,
+        underline_text_color: power_user.underline_text_color,
         quote_text_color: power_user.quote_text_color,
         blur_tint_color: power_user.blur_tint_color,
         chat_tint_color: power_user.chat_tint_color,
@@ -1324,59 +2431,54 @@ async function saveTheme() {
         timestamp_model_icon: power_user.timestamp_model_icon,
 
         mesIDDisplay_enabled: power_user.mesIDDisplay_enabled,
+        hideChatAvatars_enabled: power_user.hideChatAvatars_enabled,
         message_token_count_enabled: power_user.message_token_count_enabled,
         expand_message_actions: power_user.expand_message_actions,
-
+        enableZenSliders: power_user.enableZenSliders,
+        enableLabMode: power_user.enableLabMode,
         hotswap_enabled: power_user.hotswap_enabled,
         custom_css: power_user.custom_css,
-
-
+        bogus_folders: power_user.bogus_folders,
+        zoomed_avatar_magnification: power_user.zoomed_avatar_magnification,
+        reduced_motion: power_user.reduced_motion,
+        compact_input_area: power_user.compact_input_area,
     };
+}
 
-    const response = await fetch('/savetheme', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify(theme)
-    });
-
-    if (response.ok) {
-        const themeIndex = themes.findIndex(x => x.name == name);
-
-        if (themeIndex == -1) {
-            themes.push(theme);
-            const option = document.createElement('option');
-            option.selected = true;
-            option.value = name;
-            option.innerText = name;
-            $('#themes').append(option);
+/**
+ * Applies imported theme properties to the theme object.
+ * @param {object} parsed Parsed object to get the theme from.
+ * @returns {object} Theme assigned to the parsed object.
+ */
+function getNewTheme(parsed) {
+    const theme = getThemeObject(parsed.name);
+    for (const key in parsed) {
+        if (Object.hasOwn(theme, key)) {
+            theme[key] = parsed[key];
         }
-        else {
-            themes[themeIndex] = theme;
-            $(`#themes option[value="${name}"]`).attr('selected', true);
-        }
-
-        power_user.theme = name;
-        saveSettingsDebounced();
     }
+    return theme;
 }
 
 async function saveMovingUI() {
-    const name = await callPopup('Enter a name for the MovingUI Preset:', 'input');
+    const popupResult = await callGenericPopup('Enter a name for the MovingUI Preset:', POPUP_TYPE.INPUT);
 
-    if (!name) {
+    if (!popupResult) {
         return;
     }
 
+    const name = String(popupResult);
+
     const movingUIPreset = {
         name,
-        movingUIState: power_user.movingUIState
-    }
-    console.log(movingUIPreset)
+        movingUIState: power_user.movingUIState,
+    };
+    console.log(movingUIPreset);
 
-    const response = await fetch('/savemovingui', {
+    const response = await fetch('/api/moving-ui/save', {
         method: 'POST',
         headers: getRequestHeaders(),
-        body: JSON.stringify(movingUIPreset)
+        body: JSON.stringify(movingUIPreset),
     });
 
     if (response.ok) {
@@ -1398,7 +2500,24 @@ async function saveMovingUI() {
         power_user.movingUIPreset = name;
         saveSettingsDebounced();
     } else {
-        toastr.warning('failed to save MovingUI state.')
+        toastr.error('Failed to save MovingUI state.');
+        console.error('MovingUI could not be saved', response);
+    }
+}
+
+/**
+ * Resets the movable styles of the given element to their unset values.
+ * @param {string} id Element ID
+ */
+export function resetMovableStyles(id) {
+    const panelStyles = ['top', 'left', 'right', 'bottom', 'height', 'width', 'margin'];
+
+    const panel = document.getElementById(id);
+
+    if (panel) {
+        panelStyles.forEach((style) => {
+            panel.style[style] = '';
+        });
     }
 }
 
@@ -1410,14 +2529,21 @@ async function resetMovablePanels(type) {
         'WorldInfo',
         'floatingPrompt',
         'expression-holder',
-        'groupMemberListPopout'
+        'groupMemberListPopout',
+        'summaryExtensionPopout',
+        'gallery',
+        'logprobsViewer',
+        'cfgConfig',
     ];
 
-    const panelStyles = ['top', 'left', 'right', 'bottom', 'height', 'width', 'margin',];
+    /**
+     * @type {HTMLElement[]} Generic panels that don't have a known ID
+     */
+    const draggedElements = Array.from(document.querySelectorAll('[data-dragged]'));
+    const allDraggable = panelIds.map(id => document.getElementById(id)).concat(draggedElements).filter(onlyUnique);
 
-    panelIds.forEach((id) => {
-        const panel = document.getElementById(id);
-
+    const panelStyles = ['top', 'left', 'right', 'bottom', 'height', 'width', 'margin'];
+    allDraggable.forEach((panel) => {
         if (panel) {
             $(panel).addClass('resizing');
             panelStyles.forEach((style) => {
@@ -1426,7 +2552,10 @@ async function resetMovablePanels(type) {
         }
     });
 
-    const zoomedAvatars = document.querySelectorAll('.zoomed_avatar');
+    /**
+     * @type {HTMLElement[]} Zoomed avatars that are currently being resized
+     */
+    const zoomedAvatars = Array.from(document.querySelectorAll('.zoomed_avatar'));
     if (zoomedAvatars.length > 0) {
         zoomedAvatars.forEach((avatar) => {
             avatar.classList.add('resizing');
@@ -1437,24 +2566,24 @@ async function resetMovablePanels(type) {
     }
 
     $('[data-dragged="true"]').removeAttr('data-dragged');
-    await delay(50)
+    await delay(50);
 
     power_user.movingUIState = {};
 
     //if user manually resets panels, deselect the current preset
     if (type !== 'quiet' && type !== 'resize') {
-        power_user.movingUIPreset = 'Default'
-        $(`#movingUIPresets option[value="Default"]`).prop('selected', true);
+        power_user.movingUIPreset = 'Default';
+        $('#movingUIPresets option[value="Default"]').prop('selected', true);
     }
 
     saveSettingsDebounced();
     eventSource.emit(event_types.MOVABLE_PANELS_RESET);
 
     eventSource.once(event_types.SETTINGS_UPDATED, () => {
-        $(".resizing").removeClass('resizing');
+        $('.resizing').removeClass('resizing');
         //if happening as part of preset application, do it quietly.
         if (type === 'quiet') {
-            return
+            return;
             //if happening due to resize, tell user.
         } else if (type === 'resize') {
             toastr.warning('Panel positions reset due to zoom/resize');
@@ -1465,88 +2594,171 @@ async function resetMovablePanels(type) {
     });
 }
 
-function doNewChat() {
-    setTimeout(() => {
-        $("#option_start_new_chat").trigger('click');
-    }, 1);
-    //$("#dialogue_popup").hide();
-    setTimeout(() => {
-        $("#dialogue_popup_ok").trigger('click');
-    }, 1);
+/**
+ * Finds the ID of the tag with the given name.
+ * @param {string} name
+ * @returns {string} The ID of the tag with the given name.
+ */
+function findTagIdByName(name) {
+    const matchTypes = [
+        (a, b) => a === b,
+        (a, b) => a.startsWith(b),
+        (a, b) => a.includes(b),
+    ];
+
+    // Only get tags that contain at least one record in the tag_map
+    const liveTagIds = new Set(Object.values(tag_map).flat());
+    const liveTags = tags.filter(x => liveTagIds.has(x.id));
+
+    const exactNameMatchIndex = liveTags.map(x => x.name.toLowerCase()).indexOf(name.toLowerCase());
+
+    if (exactNameMatchIndex !== -1) {
+        return liveTags[exactNameMatchIndex].id;
+    }
+
+    for (const matchType of matchTypes) {
+        const index = liveTags.findIndex(x => matchType(x.name.toLowerCase(), name.toLowerCase()));
+        if (index !== -1) {
+            return liveTags[index].id;
+        }
+    }
 }
 
-function doRandomChat() {
-    resetSelectedGroup();
-    setCharacterId(Math.floor(Math.random() * characters.length).toString());
-    setTimeout(() => {
-        reloadCurrentChat();
-    }, 1);
+async function doRandomChat(_, tagName) {
+    /**
+     * Gets the ID of a random character.
+     * @returns {string} The order index of the randomly selected character.
+     */
+    function getRandomCharacterId() {
+        if (!tagName) {
+            return Math.floor(Math.random() * characters.length).toString();
+        }
 
+        const tagId = findTagIdByName(tagName);
+        const taggedCharacters = Object.entries(tag_map)
+            .filter(x => x[1].includes(tagId)) // Get only records that include the tag
+            .map(x => x[0]) // Map the character avatar
+            .filter(x => characters.find(y => y.avatar === x)); // Filter out characters that don't exist
+        const randomCharacter = taggedCharacters[Math.floor(Math.random() * taggedCharacters.length)];
+        const randomIndex = characters.findIndex(x => x.avatar === randomCharacter);
+        if (randomIndex === -1) {
+            return;
+        }
+        return randomIndex.toString();
+    }
+
+    resetSelectedGroup();
+    const characterId = getRandomCharacterId();
+    if (!characterId) {
+        toastr.error('No characters found');
+        return;
+    }
+    setCharacterId(characterId);
+    setActiveCharacter(characters[characterId]?.avatar);
+    setActiveGroup(null);
+    await delay(1);
+    await reloadCurrentChat();
+    return characters[characterId]?.name;
+}
+
+/**
+ * Loads the chat until the given message ID is displayed.
+ * @param {number} mesId
+ * @returns JQuery<HTMLElement>
+ */
+async function loadUntilMesId(mesId) {
+    let target;
+
+    while (getFirstDisplayedMessageId() > mesId && getFirstDisplayedMessageId() !== 0) {
+        showMoreMessages();
+        await delay(1);
+        target = $('#chat').find(`.mes[mesid=${mesId}]`);
+
+        if (target.length) {
+            break;
+        }
+    }
+
+    if (!target.length) {
+        toastr.error(`Could not find message with ID: ${mesId}`);
+        return target;
+    }
+
+    return target;
 }
 
 async function doMesCut(_, text) {
-    console.debug(`was asked to cut message id #${text}`)
+    console.debug(`was asked to cut message id #${text}`);
+    const range = stringToRange(text, 0, chat.length - 1);
+
     //reject invalid args or no args
-    if (text && isNaN(text) || !text) {
-        toastr.error(`Must enter a single number only, non-number characters disallowed.`)
-        return
+    if (!range) {
+        toastr.warning('Must provide a Message ID or a range to cut.');
+        return;
     }
 
-    let mesIDToCut = Number(text).toFixed(0)
-    let mesToCut = $("#chat").find(`.mes[mesid=${mesIDToCut}]`)
+    let totalMesToCut = (range.end - range.start) + 1;
+    let mesIDToCut = range.start;
+    let cutText = '';
 
-    if (!mesToCut.length) {
-        toastr.error(`Could not find message with ID: ${mesIDToCut}`)
-        return
-    }
+    for (let i = 0; i < totalMesToCut; i++) {
+        cutText += (chat[mesIDToCut]?.mes || '') + '\n';
+        let done = false;
+        let mesToCut = $('#chat').find(`.mes[mesid=${mesIDToCut}]`);
 
-    setEditedMessageId(mesIDToCut);
-    mesToCut.find('.mes_edit_delete').trigger('click', { fromSlashCommand: true });
-}
+        if (!mesToCut.length) {
+            mesToCut = await loadUntilMesId(mesIDToCut);
 
-
-async function doDelMode(_, text) {
-
-    //first enter delmode
-    $("#option_delete_mes").trigger('click')
-
-    //reject invalid args
-    if (text && isNaN(text)) {
-        toastr.warning('Must enter a number or nothing.')
-        await delay(300) //unsure why 300 is neccessary here, but any shorter and it wont see the delmode UI
-        $("#dialogue_del_mes_cancel").trigger('click');
-        return
-    }
-
-    //parse valid args
-    if (text) {
-        await delay(300) //same as above, need event signal for 'entered del mode'
-        console.debug('parsing msgs to del')
-        let numMesToDel = Number(text);
-        let lastMesID = Number($('.last_mes').attr('mesid'));
-        let oldestMesIDToDel = lastMesID - numMesToDel + 1;
-
-        //disallow targeting first message
-        if (oldestMesIDToDel <= 0) {
-            oldestMesIDToDel = 1
+            if (!mesToCut || !mesToCut.length) {
+                return;
+            }
         }
 
-        let oldestMesToDel = $('#chat').find(`.mes[mesid=${oldestMesIDToDel}]`)
-        let oldestDelMesCheckbox = $(oldestMesToDel).find('.del_checkbox');
-        let newLastMesID = oldestMesIDToDel - 1;
-        console.debug(`DelMesReport -- numMesToDel:  ${numMesToDel}, lastMesID: ${lastMesID}, oldestMesIDToDel:${oldestMesIDToDel}, newLastMesID: ${newLastMesID}`)
-        oldestDelMesCheckbox.trigger('click');
-        let trueNumberOfDeletedMessage = lastMesID - oldestMesIDToDel + 1
-
-        //await delay(1)
-        $('#dialogue_del_mes_ok').trigger('click');
-        toastr.success(`Deleted ${trueNumberOfDeletedMessage} messages.`)
-        return
+        setEditedMessageId(mesIDToCut);
+        eventSource.once(event_types.MESSAGE_DELETED, () => {
+            done = true;
+        });
+        mesToCut.find('.mes_edit_delete').trigger('click', { fromSlashCommand: true });
+        while (!done) {
+            await delay(1);
+        }
     }
+
+    return cutText;
+}
+
+async function doDelMode(_, text) {
+    //reject invalid args
+    if (text && isNaN(text)) {
+        toastr.warning('Must enter a number or nothing.');
+        return '';
+    }
+
+    // Just enter the delete mode.
+    if (!text) {
+        $('#option_delete_mes').trigger('click', { fromSlashCommand: true });
+        return '';
+    }
+
+    const count = Number(text);
+
+    // Nothing to delete.
+    if (count < 1) {
+        return '';
+    }
+
+    if (count > chat.length) {
+        toastr.warning(`Cannot delete more than ${chat.length} messages.`);
+        return '';
+    }
+
+    const range = `${chat.length - count}-${chat.length - 1}`;
+    return doMesCut(_, range);
 }
 
 function doResetPanels() {
-    $("#movingUIreset").trigger('click');
+    $('#movingUIreset').trigger('click');
+    return '';
 }
 
 function setAvgBG() {
@@ -1573,18 +2785,18 @@ function setAvgBG() {
         var rgb = getAverageRGB(bgimg);
         //console.log(`average color of the bg is:`)
         //console.log(rgb);
-        $("#blur-tint-color-picker").attr('color', 'rgb(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ')');
+        $('#blur-tint-color-picker').attr('color', 'rgb(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ')');
 
-        const backgroundColorString = $("#blur-tint-color-picker").attr('color')
+        const backgroundColorString = $('#blur-tint-color-picker').attr('color')
             .replace('rgba', '')
             .replace('rgb', '')
             .replace('(', '[')
             .replace(')', ']');   //[50, 120, 200, 1]; // Example background color
-        const backgroundColorArray = JSON.parse(backgroundColorString) //[200, 200, 200, 1]
-        console.log(backgroundColorArray)
-        $("#main-text-color-picker").attr('color', getReadableTextColor(backgroundColorArray));
-        console.log($("#main-text-color-picker").attr('color')); // Output: 'rgba(0, 47, 126, 1)'
-    }
+        const backgroundColorArray = JSON.parse(backgroundColorString); //[200, 200, 200, 1]
+        console.log(backgroundColorArray);
+        $('#main-text-color-picker').attr('color', getReadableTextColor(backgroundColorArray));
+        console.log($('#main-text-color-picker').attr('color')); // Output: 'rgba(0, 47, 126, 1)'
+    };
 
     /*     charAvatar.onload = function () {
             var rgb = getAverageRGB(charAvatar);
@@ -1623,7 +2835,7 @@ function setAvgBG() {
         try {
             data = context.getImageData(0, 0, width, height);
         } catch (e) {
-    /* security error, img on diff domain */alert('x');
+            /* security error, img on diff domain */alert('x');
             return defaultRGB;
         }
 
@@ -1672,27 +2884,6 @@ function setAvgBG() {
         const b = hueToRgb(p, q, h - 1 / 3);
 
         return [r * 255, g * 255, b * 255];
-    }
-
-    function rgbToLuminance(r, g, b) {
-        console.log(r, g, b)
-        const gammaCorrect = (color) => {
-            return color <= 0.03928
-                ? color / 12.92
-                : Math.pow((color + 0.055) / 1.055, 2.4);
-        };
-
-        const rsRGB = r / 255;
-        const gsRGB = g / 255;
-        const bsRGB = b / 255;
-
-        const rLuminance = gammaCorrect(rsRGB).toFixed(2);
-        const gLuminance = gammaCorrect(gsRGB).toFixed(2);
-        const bLuminance = gammaCorrect(bsRGB).toFixed(2);
-
-        console.log(`rLum ${rLuminance}, gLum ${gLuminance}, bLum ${bLuminance}`)
-
-        return 0.2126 * Number(rLuminance) + 0.7152 * Number(gLuminance) + 0.0722 * Number(bLuminance);
     }
 
     //this version keeps BG and main text in same hue
@@ -1774,9 +2965,84 @@ function setAvgBG() {
         return `rgba(${rNew.toFixed(0)}, ${gNew.toFixed(0)}, ${bNew.toFixed(0)}, 1)`;
     }
 
-
+    return '';
 }
 
+async function setThemeCallback(_, themeName) {
+    if (!themeName) {
+        // allow reporting of the theme name if called without args
+        // for use in ST Scripts via pipe
+        return power_user.theme;
+    }
+
+    // @ts-ignore
+    const fuse = new Fuse(themes, {
+        keys: [
+            { name: 'name', weight: 1 },
+        ],
+    });
+
+    const results = fuse.search(themeName);
+    console.debug('Theme fuzzy search results for ' + themeName, results);
+    const theme = results[0]?.item;
+
+    if (!theme) {
+        toastr.warning(`Could not find theme with name: ${themeName}`);
+        return;
+    }
+
+    power_user.theme = theme.name;
+    applyTheme(theme.name);
+    $('#themes').val(theme.name);
+    saveSettingsDebounced();
+    return '';
+}
+
+async function setmovingUIPreset(_, text) {
+    // @ts-ignore
+    const fuse = new Fuse(movingUIPresets, {
+        keys: [
+            { name: 'name', weight: 1 },
+        ],
+    });
+
+    const results = fuse.search(text);
+    console.debug('movingUI preset fuzzy search results for ' + text, results);
+    const preset = results[0]?.item;
+
+    if (!preset) {
+        toastr.warning(`Could not find preset with name: ${text}`);
+        return;
+    }
+
+    power_user.movingUIPreset = preset.name;
+    applyMovingUIPreset(preset.name);
+    $('#movingUIPresets').val(preset.name);
+    saveSettingsDebounced();
+    return '';
+}
+
+const EPHEMERAL_STOPPING_STRINGS = [];
+
+/**
+ * Adds a stopping string to the list of stopping strings that are only used for the next generation.
+ * @param {string} value The stopping string to add
+ */
+export function addEphemeralStoppingString(value) {
+    if (!EPHEMERAL_STOPPING_STRINGS.includes(value)) {
+        console.debug('Adding ephemeral stopping string:', value);
+        EPHEMERAL_STOPPING_STRINGS.push(value);
+    }
+}
+
+export function flushEphemeralStoppingStrings() {
+    if (EPHEMERAL_STOPPING_STRINGS.length === 0) {
+        return;
+    }
+
+    console.debug('Flushing ephemeral stopping strings:', EPHEMERAL_STOPPING_STRINGS);
+    EPHEMERAL_STOPPING_STRINGS.splice(0, EPHEMERAL_STOPPING_STRINGS.length);
+}
 
 /**
  * Gets the custom stopping strings from the power user settings.
@@ -1784,184 +3050,274 @@ function setAvgBG() {
  * @returns {string[]} An array of custom stopping strings
  */
 export function getCustomStoppingStrings(limit = undefined) {
-    try {
-        // If there's no custom stopping strings, return an empty array
-        if (!power_user.custom_stopping_strings) {
+    function getPermanent() {
+        try {
+            // If there's no custom stopping strings, return an empty array
+            if (!power_user.custom_stopping_strings) {
+                return [];
+            }
+
+            // Parse the JSON string
+            let strings = JSON.parse(power_user.custom_stopping_strings);
+
+            // Make sure it's an array
+            if (!Array.isArray(strings)) {
+                return [];
+            }
+
+            // Make sure all the elements are strings and non-empty.
+            strings = strings.filter(s => typeof s === 'string' && s.length > 0);
+
+            // Substitute params if necessary
+            if (power_user.custom_stopping_strings_macro) {
+                strings = strings.map(x => substituteParams(x));
+            }
+
+            return strings;
+        } catch (error) {
+            // If there's an error, return an empty array
+            console.warn('Error parsing custom stopping strings:', error);
             return [];
         }
-
-        // Parse the JSON string
-        let strings = JSON.parse(power_user.custom_stopping_strings);
-
-        // Make sure it's an array
-        if (!Array.isArray(strings)) {
-            return [];
-        }
-
-        // Make sure all the elements are strings and non-empty.
-        strings = strings.filter(s => typeof s === 'string' && s.length > 0);
-
-        // Substitute params if necessary
-        if (power_user.custom_stopping_strings_macro) {
-            strings = strings.map(x => substituteParams(x));
-        }
-
-        // Apply the limit. If limit is 0, return all strings.
-        if (limit > 0) {
-            strings = strings.slice(0, limit);
-        }
-
-        return strings;
-    } catch (error) {
-        // If there's an error, return an empty array
-        console.warn('Error parsing custom stopping strings:', error);
-        return [];
     }
+
+    const permanent = getPermanent();
+    const ephemeral = EPHEMERAL_STOPPING_STRINGS;
+    const strings = [...permanent, ...ephemeral];
+
+    // Apply the limit. If limit is 0, return all strings.
+    if (limit > 0) {
+        return strings.slice(0, limit);
+    }
+
+    return strings;
+}
+
+export function forceCharacterEditorTokenize() {
+    $('[data-token-counter]').each(function () {
+        $(document.getElementById($(this).data('token-counter'))).data('last-value-hash', '');
+    });
+    $('#rm_ch_create_block').trigger('input');
+    $('#character_popup').trigger('input');
 }
 
 $(document).ready(() => {
+    const adjustAutocompleteDebounced = debounce(() => {
+        $('.ui-autocomplete-input').each(function () {
+            const isOpen = $(this).autocomplete('widget')[0].style.display !== 'none';
+            if (isOpen) {
+                $(this).autocomplete('search');
+            }
+        });
+    });
 
-    $(window).on('resize', async () => {
-        if (isMobile()) {
-            return
-        }
-
-        //console.log('Window resized!');
-        const zoomLevel = Number(window.devicePixelRatio).toFixed(2);
+    const reportZoomLevelDebounced = debounce(() => {
+        const zoomLevel = Number(window.devicePixelRatio).toFixed(2) || 1;
         const winWidth = window.innerWidth;
         const winHeight = window.innerHeight;
-        console.debug(`Zoom: ${zoomLevel}, X:${winWidth}, Y:${winHeight}`);
-        if (Object.keys(power_user.movingUIState).length > 0) {
-            resetMovablePanels('resize');
-        }
-        // Adjust layout and styling here
+        const originalWidth = winWidth * zoomLevel;
+        const originalHeight = winHeight * zoomLevel;
+        console.log(`Window resize: ${coreTruthWinWidth}x${coreTruthWinHeight} -> ${window.innerWidth}x${window.innerHeight}`);
+        console.debug(`Zoom: ${zoomLevel}, X:${winWidth}, Y:${winHeight}, original: ${originalWidth}x${originalHeight} `);
+        return zoomLevel;
+    });
+
+    var coreTruthWinWidth = window.innerWidth;
+    var coreTruthWinHeight = window.innerHeight;
+
+    $(window).on('resize', async () => {
+        adjustAutocompleteDebounced();
         setHotswapsDebounced();
+
+        if (isMobile()) {
+            return;
+        }
+
+        reportZoomLevelDebounced();
+
+        //attempt to scale movingUI elements naturally across window resizing/zooms
+        //this will still break if the zoom level causes mobile styles to come into play.
+        const scaleY = Number(window.innerHeight / coreTruthWinHeight).toFixed(4);
+        const scaleX = Number(window.innerWidth / coreTruthWinWidth).toFixed(4);
+
+        if (Object.keys(power_user.movingUIState).length > 0) {
+            for (var elmntName of Object.keys(power_user.movingUIState)) {
+                var elmntState = power_user.movingUIState[elmntName];
+                var oldHeight = elmntState.height;
+                var oldWidth = elmntState.width;
+                var oldLeft = elmntState.left;
+                var oldTop = elmntState.top;
+                var oldBottom = elmntState.bottom;
+                var oldRight = elmntState.right;
+                var newHeight, newWidth, newTop, newBottom, newLeft, newRight;
+
+                newHeight = Number(oldHeight * scaleY).toFixed(0);
+                newWidth = Number(oldWidth * scaleX).toFixed(0);
+                newLeft = Number(oldLeft * scaleX).toFixed(0);
+                newTop = Number(oldTop * scaleY).toFixed(0);
+                newBottom = Number(oldBottom * scaleY).toFixed(0);
+                newRight = Number(oldRight * scaleX).toFixed(0);
+                try {
+                    var elmnt = $('#' + $.escapeSelector(elmntName));
+                    if (elmnt.length) {
+                        console.log(`scaling ${elmntName} by ${scaleX}x${scaleY} to ${newWidth}x${newHeight}`);
+                        elmnt.css('height', newHeight);
+                        elmnt.css('width', newWidth);
+                        elmnt.css('inset', `${newTop}px ${newRight}px ${newBottom}px ${newLeft}px`);
+                        power_user.movingUIState[elmntName].height = newHeight;
+                        power_user.movingUIState[elmntName].width = newWidth;
+                        power_user.movingUIState[elmntName].top = newTop;
+                        power_user.movingUIState[elmntName].bottom = newBottom;
+                        power_user.movingUIState[elmntName].left = newLeft;
+                        power_user.movingUIState[elmntName].right = newRight;
+                    } else {
+                        console.log(`skipping ${elmntName} because it doesn't exist in the DOM`);
+                    }
+                } catch (err) {
+                    console.log(`error occurred while processing ${elmntName}: ${err}`);
+                }
+            }
+        } else {
+            console.debug('aborting MUI reset', Object.keys(power_user.movingUIState).length);
+        }
+        saveSettingsDebounced();
+        coreTruthWinWidth = window.innerWidth;
+        coreTruthWinHeight = window.innerHeight;
     });
 
     // Settings that go to settings.json
-    $("#collapse-newlines-checkbox").change(function () {
-        power_user.collapse_newlines = !!$(this).prop("checked");
-        saveSettingsDebounced();
-    });
-
-    $("#pin-examples-checkbox").change(function () {
-        if ($(this).prop("checked")) {
-            $("#remove-examples-checkbox").prop("checked", false).prop("disabled", true);
-            power_user.strip_examples = false;
-        } else {
-            $("#remove-examples-checkbox").prop("disabled", false);
-        }
-        power_user.pin_examples = !!$(this).prop("checked");
-        saveSettingsDebounced();
-    });
-
-    $("#remove-examples-checkbox").change(function () {
-        if ($(this).prop("checked")) {
-            $("#pin-examples-checkbox").prop("checked", false).prop("disabled", true);
-            power_user.pin_examples = false;
-        } else {
-            $("#pin-examples-checkbox").prop("disabled", false);
-        }
-        power_user.strip_examples = !!$(this).prop("checked");
+    $('#collapse-newlines-checkbox').change(function () {
+        power_user.collapse_newlines = !!$(this).prop('checked');
         saveSettingsDebounced();
     });
 
     // include newline is the child of trim sentences
     // if include newline is checked, trim sentences must be checked
     // if trim sentences is unchecked, include newline must be unchecked
-    $("#trim_sentences_checkbox").change(function () {
-        power_user.trim_sentences = !!$(this).prop("checked");
-        if (!$(this).prop("checked")) {
-            $("#include_newline_checkbox").prop("checked", false);
+    $('#trim_sentences_checkbox').change(function () {
+        power_user.trim_sentences = !!$(this).prop('checked');
+        if (!$(this).prop('checked')) {
+            $('#include_newline_checkbox').prop('checked', false);
             power_user.include_newline = false;
         }
         saveSettingsDebounced();
     });
 
-    $("#include_newline_checkbox").change(function () {
-        power_user.include_newline = !!$(this).prop("checked");
-        if ($(this).prop("checked")) {
-            $("#trim_sentences_checkbox").prop("checked", true);
+    $('#include_newline_checkbox').change(function () {
+        power_user.include_newline = !!$(this).prop('checked');
+        if ($(this).prop('checked')) {
+            $('#trim_sentences_checkbox').prop('checked', true);
             power_user.trim_sentences = true;
         }
         saveSettingsDebounced();
     });
 
-    $("#always-force-name2-checkbox").change(function () {
-        power_user.always_force_name2 = !!$(this).prop("checked");
+    $('#single_line').on('input', function () {
+        const value = !!$(this).prop('checked');
+        power_user.single_line = value;
         saveSettingsDebounced();
     });
 
-    $("#markdown_escape_strings").on('input', function () {
+    $('#always-force-name2-checkbox').change(function () {
+        power_user.always_force_name2 = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
+    $('#markdown_escape_strings').on('input', function () {
         power_user.markdown_escape_strings = String($(this).val());
         saveSettingsDebounced();
         reloadMarkdownProcessor(power_user.render_formulas);
     });
 
-    $("#start_reply_with").on('input', function () {
+    $('#start_reply_with').on('input', function () {
         power_user.user_prompt_bias = String($(this).val());
         saveSettingsDebounced();
     });
 
-    $("#chat-show-reply-prefix-checkbox").change(function () {
-        power_user.show_user_prompt_bias = !!$(this).prop("checked");
+    $('#chat-show-reply-prefix-checkbox').change(function () {
+        power_user.show_user_prompt_bias = !!$(this).prop('checked');
         reloadCurrentChat();
-        saveSettingsDebounced();
-    })
-
-    $("#auto_continue_enabled").on('change', function () {
-        power_user.auto_continue.enabled = $(this).prop("checked");
         saveSettingsDebounced();
     });
 
-    $("#auto_continue_allow_chat_completions").on('change', function () {
+    $('#auto_continue_enabled').on('change', function () {
+        power_user.auto_continue.enabled = $(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
+    $('#auto_continue_allow_chat_completions').on('change', function () {
         power_user.auto_continue.allow_chat_completions = !!$(this).prop('checked');
         saveSettingsDebounced();
     });
 
-    $("#auto_continue_target_length").on('input', function () {
+    $('#auto_continue_target_length').on('input', function () {
         power_user.auto_continue.target_length = Number($(this).val());
         saveSettingsDebounced();
     });
 
+    $('#example_messages_behavior').on('change', function () {
+        const selectedOption = String($(this).find(':selected').val());
+        console.log('Setting example messages behavior to', selectedOption);
+
+        switch (selectedOption) {
+            case 'normal':
+                power_user.pin_examples = false;
+                power_user.strip_examples = false;
+                break;
+            case 'keep':
+                power_user.pin_examples = true;
+                power_user.strip_examples = false;
+                break;
+            case 'strip':
+                power_user.pin_examples = false;
+                power_user.strip_examples = true;
+                break;
+        }
+
+        console.debug('power_user.pin_examples', power_user.pin_examples);
+        console.debug('power_user.strip_examples', power_user.strip_examples);
+
+        saveSettingsDebounced();
+    });
+
     // Settings that go to local storage
-    $("#fast_ui_mode").change(function () {
-        power_user.fast_ui_mode = $(this).prop("checked");
+    $('#fast_ui_mode').change(function () {
+        power_user.fast_ui_mode = $(this).prop('checked');
         localStorage.setItem(storage_keys.fast_ui_mode, power_user.fast_ui_mode);
         switchUiMode();
         saveSettingsDebounced();
     });
 
-    $("#waifuMode").on('change', () => {
-        power_user.waifuMode = $('#waifuMode').prop("checked");
+    $('#waifuMode').on('change', () => {
+        power_user.waifuMode = $('#waifuMode').prop('checked');
         switchWaifuMode();
         saveSettingsDebounced();
     });
 
-    $("#customCSS").on('change', () => {
+    $('#customCSS').on('change', () => {
         power_user.custom_css = $('#customCSS').val();
         localStorage.setItem(storage_keys.custom_css, power_user.custom_css);
         saveSettingsDebounced();
         applyCustomCSS();
     });
 
-    $("#movingUImode").change(function () {
-        power_user.movingUI = $(this).prop("checked");
+    $('#movingUImode').change(function () {
+        power_user.movingUI = $(this).prop('checked');
         localStorage.setItem(storage_keys.movingUI, power_user.movingUI);
         switchMovingUI();
         saveSettingsDebounced();
     });
 
-    $("#noShadowsmode").change(function () {
-        power_user.noShadows = $(this).prop("checked");
+    $('#noShadowsmode').change(function () {
+        power_user.noShadows = $(this).prop('checked');
         localStorage.setItem(storage_keys.noShadows, power_user.noShadows);
         noShadows();
         saveSettingsDebounced();
     });
 
-    $("#movingUIreset").on('click', resetMovablePanels);
+    $('#movingUIreset').on('click', resetMovablePanels);
 
-    $("#avatar_style").on('change', function () {
+    $('#avatar_style').on('change', function () {
         const value = $(this).find(':selected').val();
         power_user.avatar_style = Number(value);
         localStorage.setItem(storage_keys.avatar_style, power_user.avatar_style);
@@ -1969,7 +3325,7 @@ $(document).ready(() => {
         saveSettingsDebounced();
     });
 
-    $("#chat_display").on('change', function () {
+    $('#chat_display').on('change', function () {
         const value = $(this).find(':selected').val();
         power_user.chat_display = Number(value);
         localStorage.setItem(storage_keys.chat_display, power_user.chat_display);
@@ -1978,142 +3334,181 @@ $(document).ready(() => {
 
     });
 
-    $('#chat_width_slider').on('input', function (e) {
+    $('#chat_width_slider').on('input', function (e, data) {
+        const applyMode = data?.forced ? 'forced' : 'normal';
         power_user.chat_width = Number(e.target.value);
         localStorage.setItem(storage_keys.chat_width, power_user.chat_width);
-        applyChatWidth();
+        applyChatWidth(applyMode);
         setHotswapsDebounced();
     });
 
-    $(`input[name="font_scale"]`).on('input', async function (e) {
-        power_user.font_scale = Number(e.target.value);
-        $("#font_scale_counter").text(power_user.font_scale);
-        localStorage.setItem(storage_keys.font_scale, power_user.font_scale);
-        await applyFontScale();
+    $('#chat_truncation').on('input', function () {
+        power_user.chat_truncation = Number($('#chat_truncation').val());
+        $('#chat_truncation_counter').val(power_user.chat_truncation);
         saveSettingsDebounced();
     });
 
-    $(`input[name="blur_strength"]`).on('input', async function (e) {
+    $('#streaming_fps').on('input', function () {
+        power_user.streaming_fps = Number($('#streaming_fps').val());
+        $('#streaming_fps_counter').val(power_user.streaming_fps);
+        saveSettingsDebounced();
+    });
+
+    $('#smooth_streaming').on('input', function () {
+        power_user.smooth_streaming = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
+    $('#smooth_streaming_speed').on('input', function () {
+        power_user.smooth_streaming_speed = Number($('#smooth_streaming_speed').val());
+        saveSettingsDebounced();
+    });
+
+    $('input[name="font_scale"]').on('input', async function (e, data) {
+        const applyMode = data?.forced ? 'forced' : 'normal';
+        power_user.font_scale = Number(e.target.value);
+        $('#font_scale_counter').val(power_user.font_scale);
+        localStorage.setItem(storage_keys.font_scale, power_user.font_scale);
+        await applyFontScale(applyMode);
+        saveSettingsDebounced();
+    });
+
+    $('input[name="blur_strength"]').on('input', async function (e) {
         power_user.blur_strength = Number(e.target.value);
-        $("#blur_strength_counter").text(power_user.blur_strength);
+        $('#blur_strength_counter').val(power_user.blur_strength);
         localStorage.setItem(storage_keys.blur_strength, power_user.blur_strength);
         await applyBlurStrength();
         saveSettingsDebounced();
     });
 
-    $(`input[name="shadow_width"]`).on('input', async function (e) {
+    $('input[name="shadow_width"]').on('input', async function (e) {
         power_user.shadow_width = Number(e.target.value);
-        $("#shadow_width_counter").text(power_user.shadow_width);
+        $('#shadow_width_counter').val(power_user.shadow_width);
         localStorage.setItem(storage_keys.shadow_width, power_user.shadow_width);
         await applyShadowWidth();
         saveSettingsDebounced();
     });
 
-    $("#main-text-color-picker").on('change', (evt) => {
+    $('#main-text-color-picker').on('change', (evt) => {
         power_user.main_text_color = evt.detail.rgba;
         applyThemeColor('main');
         saveSettingsDebounced();
     });
 
-    $("#italics-color-picker").on('change', (evt) => {
+    $('#italics-color-picker').on('change', (evt) => {
         power_user.italics_text_color = evt.detail.rgba;
         applyThemeColor('italics');
         saveSettingsDebounced();
     });
 
-    $("#quote-color-picker").on('change', (evt) => {
+    $('#underline-color-picker').on('change', (evt) => {
+        power_user.underline_text_color = evt.detail.rgba;
+        applyThemeColor('underline');
+        saveSettingsDebounced();
+    });
+
+    $('#quote-color-picker').on('change', (evt) => {
         power_user.quote_text_color = evt.detail.rgba;
         applyThemeColor('quote');
         saveSettingsDebounced();
     });
 
-    $("#blur-tint-color-picker").on('change', (evt) => {
+    $('#blur-tint-color-picker').on('change', (evt) => {
         power_user.blur_tint_color = evt.detail.rgba;
         applyThemeColor('blurTint');
         saveSettingsDebounced();
     });
 
-    $("#chat-tint-color-picker").on('change', (evt) => {
+    $('#chat-tint-color-picker').on('change', (evt) => {
         power_user.chat_tint_color = evt.detail.rgba;
         applyThemeColor('chatTint');
         saveSettingsDebounced();
     });
 
-
-    $("#user-mes-blur-tint-color-picker").on('change', (evt) => {
+    $('#user-mes-blur-tint-color-picker').on('change', (evt) => {
         power_user.user_mes_blur_tint_color = evt.detail.rgba;
         applyThemeColor('userMesBlurTint');
         saveSettingsDebounced();
     });
 
-    $("#bot-mes-blur-tint-color-picker").on('change', (evt) => {
+    $('#bot-mes-blur-tint-color-picker').on('change', (evt) => {
         power_user.bot_mes_blur_tint_color = evt.detail.rgba;
         applyThemeColor('botMesBlurTint');
         saveSettingsDebounced();
     });
 
-    $("#shadow-color-picker").on('change', (evt) => {
+    $('#shadow-color-picker').on('change', (evt) => {
         power_user.shadow_color = evt.detail.rgba;
         applyThemeColor('shadow');
         saveSettingsDebounced();
     });
 
-    $("#border-color-picker").on('change', (evt) => {
+    $('#border-color-picker').on('change', (evt) => {
         power_user.border_color = evt.detail.rgba;
         applyThemeColor('border');
         saveSettingsDebounced();
     });
 
-    $("#themes").on('change', function () {
+    $('#themes').on('change', function () {
         const themeSelected = String($(this).find(':selected').val());
         power_user.theme = themeSelected;
         applyTheme(themeSelected);
         saveSettingsDebounced();
     });
 
-    $("#movingUIPresets").on('change', async function () {
-        console.log('saw MUI preset change')
+    $('#movingUIPresets').on('change', async function () {
+        console.log('saw MUI preset change');
         const movingUIPresetSelected = String($(this).find(':selected').val());
         power_user.movingUIPreset = movingUIPresetSelected;
         applyMovingUIPreset(movingUIPresetSelected);
         saveSettingsDebounced();
-
     });
 
-    $("#ui-preset-save-button").on('click', saveTheme);
-    $("#movingui-preset-save-button").on('click', saveMovingUI);
+    $('#ui-preset-save-button').on('click', () => saveTheme());
+    $('#ui-preset-update-button').on('click', () => updateTheme());
+    $('#ui-preset-delete-button').on('click', () => deleteTheme());
+    $('#movingui-preset-save-button').on('click', saveMovingUI);
 
-    $("#never_resize_avatars").on('input', function () {
+    $('#never_resize_avatars').on('input', function () {
         power_user.never_resize_avatars = !!$(this).prop('checked');
         saveSettingsDebounced();
     });
 
-    $("#show_card_avatar_urls").on('input', function () {
+    $('#show_card_avatar_urls').on('input', function () {
         power_user.show_card_avatar_urls = !!$(this).prop('checked');
-        printCharacters();
+        printCharactersDebounced();
         saveSettingsDebounced();
     });
 
-    $("#play_message_sound").on('input', function () {
+    $('#play_message_sound').on('input', function () {
         power_user.play_message_sound = !!$(this).prop('checked');
         saveSettingsDebounced();
     });
 
-    $("#play_sound_unfocused").on('input', function () {
+    $('#play_sound_unfocused').on('input', function () {
         power_user.play_sound_unfocused = !!$(this).prop('checked');
         saveSettingsDebounced();
     });
 
-    $("#auto_save_msg_edits").on('input', function () {
+    $('#auto_save_msg_edits').on('input', function () {
         power_user.auto_save_msg_edits = !!$(this).prop('checked');
         saveSettingsDebounced();
     });
 
-    $("#character_sort_order").on('change', function () {
-        power_user.sort_field = $(this).find(":selected").data('field');
-        power_user.sort_order = $(this).find(":selected").data('order');
-        power_user.sort_rule = $(this).find(":selected").data('rule');
-        printCharacters();
+    $('#character_sort_order').on('change', function () {
+        const field = String($(this).find(':selected').data('field'));
+        // Save sort order, but do not save search sorting, as this is a temporary sorting option
+        if (field !== 'search') {
+            power_user.sort_field = field;
+            power_user.sort_order = $(this).find(':selected').data('order');
+            power_user.sort_rule = $(this).find(':selected').data('rule');
+        }
+        printCharactersDebounced();
+        saveSettingsDebounced();
+    });
+
+    $('#gestures-checkbox').on('change', function () {
+        power_user.gestures = !!$('#gestures-checkbox').prop('checked');
         saveSettingsDebounced();
     });
 
@@ -2124,10 +3519,10 @@ $(document).ready(() => {
 
     $('#auto_swipe_blacklist').on('input', function () {
         power_user.auto_swipe_blacklist = String($(this).val())
-            .split(",")
+            .split(',')
             .map(str => str.trim())
             .filter(str => str);
-        console.log("power_user.auto_swipe_blacklist", power_user.auto_swipe_blacklist)
+        console.log('power_user.auto_swipe_blacklist', power_user.auto_swipe_blacklist);
         saveSettingsDebounced();
     });
 
@@ -2153,156 +3548,205 @@ $(document).ready(() => {
         saveSettingsDebounced();
     });
 
-    $("#console_log_prompts").on('input', function () {
+    $('#console_log_prompts').on('input', function () {
         power_user.console_log_prompts = !!$(this).prop('checked');
         saveSettingsDebounced();
     });
 
-    $('#auto_scroll_chat_to_bottom').on("input", function () {
+    $('#request_token_probabilities').on('input', function () {
+        power_user.request_token_probabilities = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
+    $('#show_group_chat_queue').on('input', function () {
+        power_user.show_group_chat_queue = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
+    $('#auto_scroll_chat_to_bottom').on('input', function () {
         power_user.auto_scroll_chat_to_bottom = !!$(this).prop('checked');
         saveSettingsDebounced();
     });
 
-    $("#tokenizer").on('change', function () {
+    $('#tokenizer').on('change', function () {
         const value = $(this).find(':selected').val();
         power_user.tokenizer = Number(value);
+        BIAS_CACHE.clear();
         saveSettingsDebounced();
 
         // Trigger character editor re-tokenize
-        $("#rm_ch_create_block").trigger('input');
-        $("#character_popup").trigger('input');
+        forceCharacterEditorTokenize();
     });
 
-    $("#send_on_enter").on('change', function () {
+    $('#send_on_enter').on('change', function () {
         const value = $(this).find(':selected').val();
         power_user.send_on_enter = Number(value);
         saveSettingsDebounced();
     });
 
-    $("#import_card_tags").on('input', function () {
-        power_user.import_card_tags = !!$(this).prop('checked');
-        saveSettingsDebounced();
-    });
-
-    $("#confirm_message_delete").on('input', function () {
+    $('#confirm_message_delete').on('input', function () {
         power_user.confirm_message_delete = !!$(this).prop('checked');
         saveSettingsDebounced();
     });
 
-    $("#render_formulas").on("input", function () {
+    $('#render_formulas').on('input', function () {
         power_user.render_formulas = !!$(this).prop('checked');
         reloadMarkdownProcessor(power_user.render_formulas);
         reloadCurrentChat();
         saveSettingsDebounced();
     });
 
-    $("#reload_chat").on('click', function () {
+    $('#reload_chat').on('click', async function () {
         const currentChatId = getCurrentChatId();
         if (currentChatId !== undefined && currentChatId !== null) {
-            reloadCurrentChat();
+            await saveSettings();
+            await saveChatConditional();
+            await reloadCurrentChat();
         }
     });
 
-    $("#allow_name1_display").on("input", function () {
+    $('#allow_name1_display').on('input', function () {
         power_user.allow_name1_display = !!$(this).prop('checked');
         reloadCurrentChat();
         saveSettingsDebounced();
-    })
+    });
 
-    $("#allow_name2_display").on("input", function () {
+    $('#allow_name2_display').on('input', function () {
         power_user.allow_name2_display = !!$(this).prop('checked');
         reloadCurrentChat();
         saveSettingsDebounced();
     });
 
-    $("#token_padding").on("input", function () {
+    $('#token_padding').on('input', function () {
         power_user.token_padding = Number($(this).val());
         saveSettingsDebounced();
     });
 
-    $("#messageTimerEnabled").on("input", function () {
+    $('#messageTimerEnabled').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.timer_enabled = value;
         localStorage.setItem(storage_keys.timer_enabled, Boolean(power_user.timer_enabled));
         switchTimer();
     });
 
-    $("#messageTimestampsEnabled").on("input", function () {
+    $('#messageTimestampsEnabled').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.timestamps_enabled = value;
         localStorage.setItem(storage_keys.timestamps_enabled, Boolean(power_user.timestamps_enabled));
         switchTimestamps();
     });
 
-    $("#messageModelIconEnabled").on("input", function () {
+    $('#messageModelIconEnabled').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.timestamp_model_icon = value;
         localStorage.setItem(storage_keys.timestamp_model_icon, Boolean(power_user.timestamp_model_icon));
         switchIcons();
     });
 
-    $("#messageTokensEnabled").on("input", function () {
+    $('#messageTokensEnabled').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.message_token_count_enabled = value;
         localStorage.setItem(storage_keys.message_token_count_enabled, Boolean(power_user.message_token_count_enabled));
         switchTokenCount();
     });
 
-    $("#expandMessageActions").on("input", function () {
+    $('#expandMessageActions').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.expand_message_actions = value;
         localStorage.setItem(storage_keys.expand_message_actions, Boolean(power_user.expand_message_actions));
         switchMessageActions();
     });
 
-    $("#mesIDDisplayEnabled").on("input", function () {
+    $('#enableZenSliders').on('input', function () {
+        const value = !!$(this).prop('checked');
+        if (power_user.enableLabMode === true && value === true) {
+            //disallow zenSliders while Lab Mode is active
+            toastr.warning('Disable Mad Lab Mode before enabling Zen Sliders');
+            $(this).prop('checked', false).trigger('input');
+            return;
+        }
+        power_user.enableZenSliders = value;
+        localStorage.setItem(storage_keys.enableZenSliders, Boolean(power_user.enableZenSliders));
+        saveSettingsDebounced();
+        switchZenSliders();
+    });
+
+    $('#enableLabMode').on('input', function () {
+        const value = !!$(this).prop('checked');
+        if (power_user.enableZenSliders === true && value === true) {
+            //disallow Lab Mode if ZenSliders are active
+            toastr.warning('Disable Zen Sliders before enabling Mad Lab Mode');
+            $(this).prop('checked', false).trigger('input');
+            return;
+        }
+
+        power_user.enableLabMode = value;
+        localStorage.setItem(storage_keys.enableLabMode, Boolean(power_user.enableLabMode));
+        saveSettingsDebounced();
+        switchLabMode();
+    });
+
+    $('#mesIDDisplayEnabled').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.mesIDDisplay_enabled = value;
         localStorage.setItem(storage_keys.mesIDDisplay_enabled, Boolean(power_user.mesIDDisplay_enabled));
         switchMesIDDisplay();
     });
 
-    $("#hotswapEnabled").on("input", function () {
+    $('#hideChatAvatarsEnabled').on('input', function () {
+        const value = !!$(this).prop('checked');
+        power_user.hideChatAvatars_enabled = value;
+        localStorage.setItem(storage_keys.hideChatAvatars_enabled, Boolean(power_user.hideChatAvatars_enabled));
+        switchHideChatAvatars();
+    });
+
+    $('#hotswapEnabled').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.hotswap_enabled = value;
         localStorage.setItem(storage_keys.hotswap_enabled, Boolean(power_user.hotswap_enabled));
         switchHotswap();
     });
 
-    $("#prefer_character_prompt").on("input", function () {
+    $('#prefer_character_prompt').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.prefer_character_prompt = value;
         saveSettingsDebounced();
     });
 
-    $("#prefer_character_jailbreak").on("input", function () {
+    $('#prefer_character_jailbreak').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.prefer_character_jailbreak = value;
         saveSettingsDebounced();
     });
 
-    $("#continue_on_send").on("input", function () {
+    $('#continue_on_send').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.continue_on_send = value;
         saveSettingsDebounced();
     });
 
-    $("#quick_continue").on("input", function () {
+    $('#quick_continue').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.quick_continue = value;
-        $("#mes_continue").css('display', value ? '' : 'none');
+        $('#mes_continue').css('display', value ? '' : 'none');
         saveSettingsDebounced();
     });
 
-    $("#trim_spaces").on("input", function () {
+    $('#trim_spaces').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.trim_spaces = value;
         saveSettingsDebounced();
     });
 
-    $("#relaxed_api_urls").on("input", function () {
+    $('#relaxed_api_urls').on('input', function () {
         const value = !!$(this).prop('checked');
         power_user.relaxed_api_urls = value;
+        saveSettingsDebounced();
+    });
+
+    $('#world_import_dialog').on('input', function () {
+        const value = !!$(this).prop('checked');
+        power_user.world_import_dialog = value;
         saveSettingsDebounced();
     });
 
@@ -2322,8 +3766,8 @@ $(document).ready(() => {
         saveSettingsDebounced();
     });
 
-    $("#custom_stopping_strings_macro").change(function () {
-        power_user.custom_stopping_strings_macro = !!$(this).prop("checked");
+    $('#custom_stopping_strings_macro').change(function () {
+        power_user.custom_stopping_strings_macro = !!$(this).prop('checked');
         saveSettingsDebounced();
     });
 
@@ -2352,11 +3796,158 @@ $(document).ready(() => {
         showDebugMenu();
     });
 
-    $("#ui_mode_select").on('change', function () {
+    $('#ui_mode_select').on('change', function () {
         const value = $(this).find(':selected').val();
         power_user.ui_mode = Number(value);
         saveSettingsDebounced();
         switchSimpleMode();
+    });
+
+    $('#bogus_folders').on('input', function () {
+        power_user.bogus_folders = !!$(this).prop('checked');
+        printCharactersDebounced();
+        saveSettingsDebounced();
+    });
+
+    $('#zoomed_avatar_magnification').on('input', function () {
+        power_user.zoomed_avatar_magnification = !!$(this).prop('checked');
+        printCharactersDebounced();
+        saveSettingsDebounced();
+    });
+
+    $('#aux_field').on('change', function () {
+        const value = $(this).find(':selected').val();
+        power_user.aux_field = String(value);
+        printCharactersDebounced();
+        saveSettingsDebounced();
+    });
+
+    $('#tag_import_setting').on('change', function () {
+        const value = $(this).find(':selected').val();
+        power_user.tag_import_setting = Number(value);
+        saveSettingsDebounced();
+    });
+
+    $('#stscript_autocomplete_autoHide').on('input', function () {
+        power_user.stscript.autocomplete.autoHide = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
+    $('#stscript_matching').on('change', function () {
+        const value = $(this).find(':selected').val();
+        power_user.stscript.matching = String(value);
+        saveSettingsDebounced();
+    });
+
+    $('#stscript_autocomplete_style').on('change', function () {
+        const value = $(this).find(':selected').val();
+        power_user.stscript.autocomplete.style = String(value);
+        document.body.setAttribute('data-stscript-style', power_user.stscript.autocomplete.style);
+        saveSettingsDebounced();
+    });
+
+    $('#stscript_autocomplete_font_scale').on('input', function () {
+        const value = $(this).val();
+        $('#stscript_autocomplete_font_scale_counter').val(value);
+        power_user.stscript.autocomplete.font.scale = Number(value);
+        document.body.style.setProperty('--ac-font-scale', value.toString());
+        window.dispatchEvent(new Event('resize', { bubbles: true }));
+        saveSettingsDebounced();
+    });
+    $('#stscript_autocomplete_font_scale_counter').on('input', function () {
+        const value = $(this).val();
+        $('#stscript_autocomplete_font_scale').val(value);
+        power_user.stscript.autocomplete.font.scale = Number(value);
+        document.body.style.setProperty('--ac-font-scale', value.toString());
+        window.dispatchEvent(new Event('resize', { bubbles: true }));
+        saveSettingsDebounced();
+    });
+
+    $('#stscript_autocomplete_width_left').on('input', function () {
+        const value = $(this).val();
+        power_user.stscript.autocomplete.width.left = Number(value);
+        /**@type {HTMLElement}*/(this.closest('.doubleRangeInputContainer')).style.setProperty('--value', value.toString());
+        window.dispatchEvent(new Event('resize', { bubbles: true }));
+        saveSettingsDebounced();
+    });
+
+    $('#stscript_autocomplete_width_right').on('input', function () {
+        const value = $(this).val();
+        power_user.stscript.autocomplete.width.right = Number(value);
+        /**@type {HTMLElement}*/(this.closest('.doubleRangeInputContainer')).style.setProperty('--value', value.toString());
+        window.dispatchEvent(new Event('resize', { bubbles: true }));
+        saveSettingsDebounced();
+    });
+
+    $('#stscript_parser_flag_strict_escaping').on('click', function () {
+        const value = $(this).prop('checked');
+        power_user.stscript.parser.flags[PARSER_FLAG.STRICT_ESCAPING] = value;
+        saveSettingsDebounced();
+    });
+
+    $('#stscript_parser_flag_replace_getvar').on('click', function () {
+        const value = $(this).prop('checked');
+        power_user.stscript.parser.flags[PARSER_FLAG.REPLACE_GETVAR] = value;
+        saveSettingsDebounced();
+    });
+
+    $('#restore_user_input').on('input', function () {
+        power_user.restore_user_input = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
+    $('#reduced_motion').on('input', function () {
+        power_user.reduced_motion = !!$(this).prop('checked');
+        localStorage.setItem(storage_keys.reduced_motion, String(power_user.reduced_motion));
+        switchReducedMotion();
+        saveSettingsDebounced();
+    });
+
+    $('#compact_input_area').on('input', function () {
+        power_user.compact_input_area = !!$(this).prop('checked');
+        localStorage.setItem(storage_keys.compact_input_area, String(power_user.compact_input_area));
+        switchCompactInputArea();
+        saveSettingsDebounced();
+    });
+
+    $('#auto-connect-checkbox').on('input', function () {
+        power_user.auto_connect = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
+    $('#auto-load-chat-checkbox').on('input', function () {
+        power_user.auto_load_chat = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
+    $('#forbid_external_media').on('input', function () {
+        power_user.forbid_external_media = !!$(this).prop('checked');
+        saveSettingsDebounced();
+        reloadCurrentChat();
+    });
+
+    $('#ui_preset_import_button').on('click', function () {
+        $('#ui_preset_import_file').trigger('click');
+    });
+
+    $('#ui_preset_import_file').on('change', async function () {
+        const inputElement = this instanceof HTMLInputElement && this;
+
+        try {
+            const file = inputElement?.files?.[0];
+            await importTheme(file);
+        } catch (error) {
+            console.error('Error importing UI theme', error);
+            toastr.error(String(error), 'Failed to import UI theme');
+        } finally {
+            if (inputElement) {
+                inputElement.value = null;
+            }
+        }
+    });
+
+    $('#ui_preset_export_button').on('click', async function () {
+        await exportTheme();
     });
 
     $(document).on('click', '#debug_table [data-debug-function]', function () {
@@ -2378,11 +3969,135 @@ $(document).ready(() => {
         browser_has_focus = false;
     });
 
-    registerSlashCommand('vn', toggleWaifu, [], '– swaps Visual Novel Mode On/Off', false, true);
-    registerSlashCommand('newchat', doNewChat, [], '– start a new chat with current character', true, true);
-    registerSlashCommand('random', doRandomChat, [], '– start a new chat with a random character', true, true);
-    registerSlashCommand('delmode', doDelMode, ['del'], '<span class="monospace">(optional number)</span> – enter message deletion mode, and auto-deletes N messages if numeric argument is provided', true, true);
-    registerSlashCommand('cut', doMesCut, [], '<span class="monospace">(number)</span> – cuts the specified message from the chat', true, true);
-    registerSlashCommand('resetpanels', doResetPanels, ['resetui'], '– resets UI panels to original state.', true, true);
-    registerSlashCommand('bgcol', setAvgBG, [], '– WIP test of auto-bg avg coloring', true, true);
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'vn',
+        callback: toggleWaifu,
+        helpString: 'Swaps Visual Novel Mode On/Off',
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'newchat',
+        /** @type {(args: { delete: string?}, string) => Promise<''>} */
+        callback: async (args, _) => {
+            await doNewChat({ deleteCurrentChat: isTrueBoolean(args.delete) });
+            return '';
+        },
+        namedArgumentList: [
+            SlashCommandNamedArgument.fromProps({
+                name: 'delete',
+                description: 'delete the current chat',
+                typeList: [ARGUMENT_TYPE.BOOLEAN],
+                defaultValue: 'false',
+                enumList: commonEnumProviders.boolean('trueFalse')(),
+            }),
+        ],
+        helpString: 'Start a new chat with the current character',
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'random',
+        callback: doRandomChat,
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'optional tag name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                enumProvider: () => tags.filter(tag => Object.values(tag_map).some(x => x.includes(tag.id))).map(tag => new SlashCommandEnumValue(tag.name, null, enumTypes.enum, enumIcons.tag)),
+            }),
+        ],
+        helpString: 'Start a new chat with a random character. If an argument is provided, only considers characters that have the specified tag.',
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'delmode',
+        callback: doDelMode,
+        aliases: ['del'],
+        unnamedArgumentList: [
+            new SlashCommandArgument(
+                'optional number', [ARGUMENT_TYPE.NUMBER], false,
+            ),
+        ],
+        helpString: 'Enter message deletion mode, and auto-deletes last N messages if numeric argument is provided.',
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'cut',
+        callback: doMesCut,
+        returns: 'the text of cut messages separated by a newline',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'number or range',
+                typeList: [ARGUMENT_TYPE.NUMBER, ARGUMENT_TYPE.RANGE],
+                isRequired: true,
+                acceptsMultiple: true,
+                enumProvider: commonEnumProviders.messages(),
+            }),
+        ],
+        helpString: `
+            <div>
+                Cuts the specified message or continuous chunk from the chat.
+            </div>
+            <div>
+                Ranges are inclusive!
+            </div>
+            <div>
+                <strong>Example:</strong>
+                <ul>
+                    <li>
+                        <pre><code>/cut 0-10</code></pre>
+                    </li>
+                </ul>
+            </div>
+        `,
+        aliases: [],
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'resetpanels',
+        callback: doResetPanels,
+        helpString: 'resets UI panels to original state',
+        aliases: ['resetui'],
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'bgcol',
+        callback: setAvgBG,
+        helpString: '– WIP test of auto-bg avg coloring',
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'theme',
+        callback: setThemeCallback,
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'theme name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                enumProvider: () => themes.map(theme => new SlashCommandEnumValue(theme.name)),
+            }),
+        ],
+        helpString: `
+        <div>
+            Sets a UI theme by name.
+        </div>
+        <div>
+            If no theme name is is provided, this will return the currently active theme.
+        </div>
+        <div>
+            <strong>Example:</strong>
+            <ul>
+                <li>
+                    <pre><code>/theme Cappuccino</code></pre>
+                </li>
+                <li>
+                    <pre><code>/theme</code></pre>
+                </li>
+            </ul>
+        </div>
+    `,
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'movingui',
+        callback: setmovingUIPreset,
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: true,
+                enumProvider: () => movingUIPresets.map(preset => new SlashCommandEnumValue(preset.name)),
+            }),
+        ],
+        helpString: 'activates a movingUI preset by name',
+    }));
 });

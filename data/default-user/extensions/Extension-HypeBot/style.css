@@ -1,0 +1,39 @@
+#hypeBotBar {
+    display: flex;
+    width: 100%;
+    max-width: 100%;
+    padding: 0.5em;
+    white-space: normal;
+    font-size: calc(var(--mainFontSize) * 0.9);
+    order: 20;
+    align-items: flex-start;
+}
+
+.hypebot_nokey {
+    text-align: center;
+    font-style: italic;
+}
+
+.hypebot_name {
+    display: flex;
+    font-weight: 600;
+    align-items: flex-start;
+}
+
+.hypebot_name::before {
+    content: '';
+    display: inline-block;
+    width: 70px;
+    height: 70px;
+    background-image: url('https://novelai.net/_next/static/media/clio.eaa6a77e.webp');
+    background-size: cover;
+    background-position: center;
+    margin-right: 8px;
+}
+input#hypebot_chance_slider {
+    max-width: 50%;
+}
+input#hypebot_chance_value {
+    max-width: 20%;
+	background: none;
+}

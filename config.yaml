@@ -36,7 +36,6 @@ dataRoot: ./data
 enableForwardedWhitelist: true
 enableUserAccounts: false
 enableDiscreetLogin: false
-cookieSecret: 
 disableCsrfProtection: true
 whitelistImportDomains:
   - localhost
